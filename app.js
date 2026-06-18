@@ -106,6 +106,26 @@ function calcBodyAge({age,bmi,activityLevel}){
   mod += ab[activityLevel] ?? 0;
   return Math.max(Math.round(age+mod),15);
 }
+function calcRecoveryScore(history) {
+  if (!history.length) return 100;
+  const last = history[history.length-1];
+  const daysSince = Math.floor((Date.now()-new Date(last.date).getTime())/86400000);
+  const weekAgo = Date.now()-7*86400000;
+  const recentCount = history.filter(e=>new Date(e.date).getTime()>=weekAgo).length;
+  let score = 70;
+  if (daysSince===0) score -= 25;
+  else if (daysSince===1) score += 10;
+  else if (daysSince<=3) score += 20;
+  else score += 5;
+  score -= Math.max(0, recentCount-4)*5;
+  return Math.max(10, Math.min(100, Math.round(score)));
+}
+function recoveryLabel(score) {
+  if (score>=80) return 'Plne zregenerovaný. Ideálny deň na tréning.';
+  if (score>=60) return 'Pripravený na tréning. Dobrá regenerácia.';
+  if (score>=40) return 'Mierna únava. Zváž ľahší tréning.';
+  return 'Vysoká záťaž posledné dni. Zváž regeneračný deň.';
+}
 function calcOneRM(w,reps){ if(!w||!reps) return null; if(reps===1) return w; return Math.round(w*(1+reps/30)); }
 function calcWarmupSets(workingWeight){
   if(!workingWeight) return [];
@@ -145,6 +165,34 @@ let NUTRITION_LOG = DB.get('nutrition') || {}; // { 'YYYY-MM-DD': [{...}] }
 function saveNutrition(){ DB.set('nutrition', NUTRITION_LOG); }
 let WATER_LOG = DB.get('water') || {}; // { 'YYYY-MM-DD': ml }
 function saveWater(){ DB.set('water', WATER_LOG); }
+let WEIGHT_LOG = DB.get('weightLog') || {}; // { 'YYYY-MM-DD': kg }
+function saveWeightLog(){ DB.set('weightLog', WEIGHT_LOG); }
+
+const EXPORT_KEYS = ['profile','session','history','splits','activeSplitId','nutrition','water','weightLog'];
+function exportData() {
+  const data = {};
+  EXPORT_KEYS.forEach(k=>{ data[k]=DB.get(k); });
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `forgex-export-${todayKey()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function importDataFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    let data;
+    try { data = JSON.parse(e.target.result); } catch { alert('Neplatný súbor.'); return; }
+    EXPORT_KEYS.forEach(k=>{ if (data[k]!==undefined) DB.set(k, data[k]); });
+    alert('Dáta importované. Appka sa reštartuje.');
+    location.reload();
+  };
+  reader.readAsText(file);
+}
 
 function todayKey(){ return new Date().toISOString().split('T')[0]; }
 
@@ -772,13 +820,14 @@ function renderTabHome() {
 
   wrap.appendChild(h('h1', {}, 'Vitaj späť' + (PROFILE.name?`, ${PROFILE.name}`:'') + ' 👋'));
 
-  // Regeneračné skóre (placeholder výpočet)
+  // Regeneračné skóre
+  const recScore = calcRecoveryScore(HISTORY);
   const recCard = h('div',{class:'card',style:'display:flex;align-items:center;margin-top:18px'});
   recCard.appendChild(h('div',{style:'width:50px;height:50px;border-radius:25px;border:3px solid var(--pri);display:flex;align-items:center;justify-content:center;flex-shrink:0'},
-    h('span',{style:'color:var(--pri);font-weight:800;font-size:16px'},'82')));
+    h('span',{style:'color:var(--pri);font-weight:800;font-size:16px'},String(recScore))));
   const recText = h('div',{style:'margin-left:14px'});
   recText.appendChild(h('p',{style:'color:var(--txt);font-weight:700;font-size:14px'},'Regeneračné skóre'));
-  recText.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:2px'},'Pripravený na tréning. Dobrá regenerácia.'));
+  recText.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:2px'},recoveryLabel(recScore)));
   recCard.appendChild(recText);
   wrap.appendChild(recCard);
 
@@ -1155,14 +1204,33 @@ function renderHistoryView() {
 // ───────────────────────── TAB: NUTRITION ──────────────────────────────
 const QUICK_FOODS = [
   {name:'Kuracie prsia (100g)',calories:165,protein:31,carbs:0,fat:3.6},
+  {name:'Kuracie stehno (100g)',calories:209,protein:26,carbs:0,fat:10.9},
+  {name:'Hovädzie mleté 10% (100g)',calories:217,protein:18,carbs:0,fat:15},
+  {name:'Bravčová panenka (100g)',calories:143,protein:21.5,carbs:0,fat:5.4},
+  {name:'Losos (100g)',calories:208,protein:20,carbs:0,fat:13},
+  {name:'Tuniak vo vlastnej omáčke (100g)',calories:116,protein:26,carbs:0,fat:1},
   {name:'Ryža biela (100g varená)',calories:130,protein:2.7,carbs:28,fat:0.3},
+  {name:'Ryža basmati (100g varená)',calories:121,protein:2.5,carbs:25,fat:0.4},
+  {name:'Zemiaky varené (100g)',calories:87,protein:1.9,carbs:20,fat:0.1},
+  {name:'Cestoviny varené (100g)',calories:158,protein:5.8,carbs:31,fat:0.9},
   {name:'Vajce (1ks)',calories:78,protein:6.3,carbs:0.6,fat:5.3},
   {name:'Banán (1ks)',calories:105,protein:1.3,carbs:27,fat:0.4},
+  {name:'Jablko (1ks)',calories:95,protein:0.5,carbs:25,fat:0.3},
   {name:'Tvaroh (100g)',calories:98,protein:11,carbs:3.4,fat:4.3},
+  {name:'Grécky jogurt biely (100g)',calories:97,protein:9,carbs:3.6,fat:5},
+  {name:'Mozzarella (100g)',calories:280,protein:22,carbs:2.2,fat:21},
   {name:'Ovsené vločky (100g)',calories:389,protein:16.9,carbs:66,fat:6.9},
+  {name:'Celozrnný chlieb (1 krajec)',calories:80,protein:3.6,carbs:14,fat:1},
   {name:'Whey proteín (1 dávka 30g)',calories:120,protein:24,carbs:3,fat:1.5},
   {name:'Mandle (30g)',calories:174,protein:6.4,carbs:6.1,fat:15},
+  {name:'Vlašské orechy (30g)',calories:196,protein:4.6,carbs:4.1,fat:19.6},
+  {name:'Arašidové maslo (1 PL)',calories:94,protein:4,carbs:3,fat:8},
+  {name:'Avokádo (100g)',calories:160,protein:2,carbs:8.5,fat:14.7},
+  {name:'Olivový olej (1 PL)',calories:119,protein:0,carbs:0,fat:13.5},
+  {name:'Brokolica varená (100g)',calories:35,protein:2.4,carbs:7.2,fat:0.4},
 ];
+
+let foodSearchQuery = '';
 
 function renderTabNutrition() {
   const wrap = h('div', {class:'scroll'});
@@ -1211,29 +1279,78 @@ function renderTabNutrition() {
   return wrap;
 }
 
+function addFoodEntry(food) {
+  if (!NUTRITION_LOG[todayKey()]) NUTRITION_LOG[todayKey()]=[];
+  NUTRITION_LOG[todayKey()].push({...food});
+  saveNutrition();
+  closeModal();
+  render();
+}
+
 function openAddFoodModal() {
+  foodSearchQuery = '';
   const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
-  const sheet = h('div',{class:'modal-sheet'});
+  const sheet = h('div',{class:'modal-sheet', style:'max-height:80vh'});
   sheet.appendChild(h('div',{class:'modal-handle'}));
   sheet.appendChild(h('h2',{style:'margin-bottom:14px'},'Pridať jedlo'));
 
-  QUICK_FOODS.forEach(food=>{
-    const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center;justify-content:space-between',
-      onClick:()=>{
-        if (!NUTRITION_LOG[todayKey()]) NUTRITION_LOG[todayKey()]=[];
-        NUTRITION_LOG[todayKey()].push({...food});
-        saveNutrition();
-        closeModal();
-        render();
-      }});
-    const left = h('div');
-    left.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:14px'},food.name));
-    left.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:3px'},`${food.calories} kcal · B:${food.protein}g S:${food.carbs}g T:${food.fat}g`));
-    row.appendChild(left);
-    row.appendChild(h('span',{style:'color:var(--pri);font-size:18px'},'+'));
-    sheet.appendChild(row);
-  });
+  const searchInput = h('input',{class:'set-input', style:'text-align:left;padding:10px 12px;margin-bottom:10px', placeholder:'Hľadať jedlo...', value:foodSearchQuery,
+    onInput:(e)=>{ foodSearchQuery=e.target.value; refreshFoodList(); }});
+  sheet.appendChild(searchInput);
 
+  const customBtn = h('button',{class:'btn btn-outline btn-sm', style:'margin-bottom:10px', onClick:()=>{ closeModal(); openCustomFoodModal(); }},'+ Vlastné jedlo');
+  sheet.appendChild(customBtn);
+
+  const listWrap = h('div',{id:'food-list'});
+  sheet.appendChild(listWrap);
+  sheet.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:8px', onClick:closeModal},'Zavrieť'));
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+
+  function refreshFoodList() {
+    const list = document.getElementById('food-list');
+    if (!list) return;
+    list.innerHTML='';
+    const q = foodSearchQuery.trim().toLowerCase();
+    const filtered = q ? QUICK_FOODS.filter(f=>f.name.toLowerCase().includes(q)) : QUICK_FOODS;
+    filtered.forEach(food=>{
+      const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center;justify-content:space-between',
+        onClick:()=>addFoodEntry(food)});
+      const left = h('div');
+      left.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:14px'},food.name));
+      left.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:3px'},`${food.calories} kcal · B:${food.protein}g S:${food.carbs}g T:${food.fat}g`));
+      row.appendChild(left);
+      row.appendChild(h('span',{style:'color:var(--pri);font-size:18px'},'+'));
+      list.appendChild(row);
+    });
+    if (!filtered.length) list.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:20px'},'Žiadne jedlo nenájdené'));
+  }
+  refreshFoodList();
+}
+
+function openCustomFoodModal() {
+  const tmp = { name:'', calories:'', protein:'', carbs:'', fat:'' };
+  const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
+  const sheet = h('div',{class:'modal-sheet'});
+  sheet.appendChild(h('div',{class:'modal-handle'}));
+  sheet.appendChild(h('h2',{style:'margin-bottom:14px'},'Vlastné jedlo'));
+
+  sheet.appendChild(inputField('Názov', '', 'napr. Domáca polievka', null, v=>tmp.name=v, 'text'));
+  sheet.appendChild(inputField('Kalórie', '', 'kcal', 'kcal', v=>tmp.calories=v, 'numeric'));
+  sheet.appendChild(inputField('Bielkoviny', '', 'g', 'g', v=>tmp.protein=v, 'numeric'));
+  sheet.appendChild(inputField('Sacharidy', '', 'g', 'g', v=>tmp.carbs=v, 'numeric'));
+  sheet.appendChild(inputField('Tuky', '', 'g', 'g', v=>tmp.fat=v, 'numeric'));
+
+  sheet.appendChild(h('button',{class:'btn btn-primary', style:'margin-top:8px', onClick:()=>{
+    if (!tmp.name || !tmp.calories) { alert('Vyplň aspoň názov a kalórie.'); return; }
+    addFoodEntry({
+      name: tmp.name,
+      calories: parseFloat(tmp.calories)||0,
+      protein: parseFloat(tmp.protein)||0,
+      carbs: parseFloat(tmp.carbs)||0,
+      fat: parseFloat(tmp.fat)||0,
+    });
+  }},'Pridať'));
   sheet.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:8px', onClick:closeModal},'Zavrieť'));
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
@@ -1247,9 +1364,38 @@ function closeModal() {
 let statsSelectedEx = null;
 let chartInstance = null;
 
+let weightChartInstance = null;
+function renderWeightChart() {
+  const canvas = document.getElementById('weightChart');
+  if (!canvas || typeof Chart==='undefined') return;
+  if (weightChartInstance) { weightChartInstance.destroy(); weightChartInstance=null; }
+  const entries = Object.entries(WEIGHT_LOG).sort((a,b)=>a[0].localeCompare(b[0]));
+  const labels = entries.map(([date])=>{ const d=new Date(date); return `${d.getDate()}.${d.getMonth()+1}`; });
+  const values = entries.map(([,v])=>v);
+  const accColor = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim();
+  weightChartInstance = new Chart(canvas, {
+    type:'line',
+    data:{ labels, datasets:[{ label:'Hmotnosť (kg)', data:values, borderColor:accColor, backgroundColor:accColor+'22', pointBackgroundColor:accColor, pointRadius:4, tension:0.3, fill:true }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}}, y:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}} } }
+  });
+}
+
 function renderTabStats() {
   const wrap = h('div',{class:'scroll'});
   wrap.appendChild(h('h1',{},'Štatistiky'));
+
+  wrap.appendChild(h('p',{class:'section-title'},'VÁHA V ČASE'));
+  const weightEntries = Object.entries(WEIGHT_LOG);
+  if (weightEntries.length>=2) {
+    const wChartCard = h('div',{class:'card'});
+    wChartCard.appendChild(h('canvas',{id:'weightChart',height:'160'}));
+    wrap.appendChild(wChartCard);
+    setTimeout(renderWeightChart, 30);
+  } else {
+    const wEmpty = h('div',{class:'card'});
+    wEmpty.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px'},'Zaznamenaj váhu aspoň 2× v sekcii Profil pre zobrazenie grafu'));
+    wrap.appendChild(wEmpty);
+  }
 
   if (!HISTORY.length) {
     const empty = h('div',{class:'empty-state'});
@@ -1348,6 +1494,26 @@ function renderTabProfile() {
   });
   wrap.appendChild(profCard);
 
+  wrap.appendChild(h('p',{class:'section-title'},'TELESNÁ VÁHA'));
+  const weightCard = h('div',{class:'card'});
+  let tmpWeight = PROFILE.weightKg || '';
+  const weightRow = h('div',{class:'input-wrap'});
+  weightRow.appendChild(h('input',{type:'number',inputmode:'decimal',placeholder:'kg',value:tmpWeight, onInput:(e)=>{tmpWeight=e.target.value;}}));
+  weightRow.appendChild(h('span',{class:'unit'},'kg'));
+  weightCard.appendChild(weightRow);
+  weightCard.appendChild(h('button',{class:'btn btn-primary btn-sm', onClick:()=>{
+    const v = parseFloat(tmpWeight);
+    if (!v) return;
+    WEIGHT_LOG[todayKey()] = v;
+    saveWeightLog();
+    saveProfile({weightKg:v});
+    vibrate();
+    render();
+  }},'Zaznamenať dnešnú váhu'));
+  const lastWeightEntry = Object.entries(WEIGHT_LOG).sort().slice(-1)[0];
+  if (lastWeightEntry) weightCard.appendChild(h('p',{style:'color:var(--txtDim);font-size:11px;margin-top:8px'},`Posledný záznam: ${lastWeightEntry[1]} kg (${lastWeightEntry[0]})`));
+  wrap.appendChild(weightCard);
+
   wrap.appendChild(h('p',{class:'section-title'},'TÉMA APLIKÁCIE'));
   const themeGrid = h('div',{class:'theme-grid'});
   THEME_KEYS.forEach(key=>{
@@ -1375,6 +1541,18 @@ function renderTabProfile() {
     settingsCard.appendChild(row);
   });
   wrap.appendChild(settingsCard);
+
+  wrap.appendChild(h('p',{class:'section-title'},'DÁTA'));
+  const dataCard = h('div',{class:'card', style:'display:flex;gap:8px'});
+  dataCard.appendChild(h('button',{class:'btn btn-outline btn-sm', style:'flex:1', onClick:exportData},'⬇ Export'));
+  const importInput = h('input',{type:'file', accept:'application/json', style:'display:none', onChange:(e)=>{
+    const file = e.target.files[0];
+    if (file) importDataFromFile(file);
+  }});
+  const importBtn = h('button',{class:'btn btn-outline btn-sm', style:'flex:1', onClick:()=>importInput.click()},'⬆ Import');
+  dataCard.appendChild(importBtn);
+  dataCard.appendChild(importInput);
+  wrap.appendChild(dataCard);
 
   return wrap;
 }
