@@ -256,6 +256,9 @@ let CUSTOM_FOODS = DB.get('customFoods') || []; // vlastné potraviny užívate�
 function saveCustomFoods(){ DB.set('customFoods', CUSTOM_FOODS); }
 let RECENT_FOODS = DB.get('recentFoods') || []; // nedávno použité (názvy)
 function saveRecentFoods(){ DB.set('recentFoods', RECENT_FOODS); }
+// Záznamy telesných mier v čase: [{date, weightKg, bodyFatPct, waistCm, chestCm, bicepCm, thighCm, hipCm}]
+let BODY_LOG = DB.get('bodyLog') || [];
+function saveBodyLog(){ DB.set('bodyLog', BODY_LOG); }
 
 function todayKey(){ return new Date().toISOString().split('T')[0]; }
 
@@ -677,6 +680,7 @@ function render() {
     split_new: renderSplitNew,
     split_preview: renderSplitPreview,
     split_edit_day: renderSplitEditDay,
+    workout_mode: renderWorkoutMode,
   };
   const fn = routes[currentRoute] || renderMainApp;
   root.appendChild(fn());
@@ -783,18 +787,19 @@ function renderObGender() {
 }
 
 function renderObBasics() {
-  const tmp = { age: PROFILE.age, heightCm: PROFILE.heightCm, weightKg: PROFILE.weightKg };
-  const valid = tmp.age && tmp.heightCm && tmp.weightKg;
   return obScreen(1, 'Základné údaje', 'Použijeme to na výpočet BMR, TDEE a makier', (content)=>{
-    content.appendChild(inputField('Vek', tmp.age, 'napr. 28', 'rokov', v=>{tmp.age=v; }, 'numeric'));
-    content.appendChild(inputField('Výška', tmp.heightCm, 'napr. 178', 'cm', v=>{tmp.heightCm=v;}));
-    content.appendChild(inputField('Hmotnosť', tmp.weightKg, 'napr. 80', 'kg', v=>{tmp.weightKg=v;}));
+    content.appendChild(inputField('Meno (voliteľné)', PROFILE.name||'', 'napr. Gabriel', '', v=>{}, 'text'));
+    content.appendChild(inputField('Vek', PROFILE.age||'', 'napr. 28', 'rokov', v=>{}, 'numeric'));
+    content.appendChild(inputField('Výška', PROFILE.heightCm||'', 'napr. 178', 'cm', v=>{}));
+    content.appendChild(inputField('Hmotnosť', PROFILE.weightKg||'', 'napr. 80', 'kg', v=>{}));
   }, ()=>{
-    const ageEl = document.querySelectorAll('.input-wrap input')[0];
-    const hEl = document.querySelectorAll('.input-wrap input')[1];
-    const wEl = document.querySelectorAll('.input-wrap input')[2];
-    if (!ageEl.value || !hEl.value || !wEl.value) return;
-    saveProfile({ age: parseInt(ageEl.value,10), heightCm: parseFloat(hEl.value), weightKg: parseFloat(wEl.value) });
+    const inputs = document.querySelectorAll('.input-wrap input');
+    const nameVal = inputs[0].value.trim();
+    const ageVal = inputs[1].value;
+    const hVal = inputs[2].value;
+    const wVal = inputs[3].value;
+    if (!ageVal || !hVal || !wVal) return;
+    saveProfile({ name: nameVal||'', age: parseInt(ageVal,10), heightCm: parseFloat(hVal), weightKg: parseFloat(wVal) });
     navigate('ob_bodyfat');
   }, false);
 }
@@ -1269,6 +1274,17 @@ function renderDayPlan(activeDays) {
     `⏱ Spustiť prestávku (${fmtTime(PROFILE.restSeconds||90)})`);
   container.appendChild(timerBtn);
 
+  // Tlačidlo Workout mód (cvičím teraz)
+  if (doneEx < day.exercises.length) {
+    const woBtn = h('button',{class:'btn btn-primary',style:'margin-bottom:14px',onClick:()=>{
+      workoutModeExIdx = day.exercises.findIndex(ex=>!isExDone(day.id,ex));
+      if (workoutModeExIdx<0) workoutModeExIdx=0;
+      workoutModeDayId = day.id;
+      navigate('workout_mode');
+    }},'▶ Spustiť tréning (workout mód)');
+    container.appendChild(woBtn);
+  }
+
   day.exercises.forEach((ex,idx)=>container.appendChild(renderExerciseCard(day,ex,idx)));
 
   const resetBtn = h('button',{class:'btn btn-ghost',style:'margin-top:16px',onClick:()=>{
@@ -1537,7 +1553,7 @@ function finishWorkout(day) {
 }
 
 function showWorkoutSummary(day, stats, newPRs, prevVolume) {
-  const overlay = h('div',{class:'modal-overlay', style:'align-items:center', onClick:(e)=>{ if(e.target===overlay){ closeModal(); activeTab='training'; render(); } }});
+  const overlay = h('div',{class:'modal-overlay', style:'align-items:center', onClick:(e)=>{ if(e.target===overlay){ closeModal(); activeTab='training'; navigate('home'); } }});
   const sheet = h('div',{class:'modal-sheet', style:'border-radius:20px;margin:0 16px;max-width:420px'});
 
   sheet.appendChild(h('div',{style:'text-align:center;font-size:44px;margin-bottom:8px'},'💪'));
@@ -1581,7 +1597,7 @@ function showWorkoutSummary(day, stats, newPRs, prevVolume) {
     sheet.appendChild(prCard);
   }
 
-  sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ closeModal(); activeTab='training'; trainingSubView='history'; render(); }},'Super! 🎉'));
+  sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ closeModal(); activeTab='training'; trainingSubView='history'; navigate('home'); }},'Super! 🎉'));
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
 }
@@ -1872,12 +1888,25 @@ function renderTabNutrition() {
       const mealCal = items.reduce((a,x)=>a+(x.it.calories||0),0);
       wrap.appendChild(h('p',{class:'section-title'}, `${meal.icon} ${meal.label.toUpperCase()} · ${mealCal} kcal`));
       items.forEach(({it,idx})=>{
-        const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center;justify-content:space-between'});
+        const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center'});
         const left = h('div',{style:'flex:1;min-width:0'});
         const amountLabel = it.unit==='ks' ? `${it.amount}ks` : `${it.amount}g`;
         left.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:14px'},`${it.name} · ${amountLabel}`));
         left.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:3px'},`${it.calories} kcal · B:${it.protein}g S:${it.carbs}g T:${it.fat}g`));
         row.appendChild(left);
+        // Editovať
+        const editBtn = h('button',{class:'btn btn-ghost btn-sm', onClick:()=>{
+          // Nájdi pôvodnú potravinu v DB
+          const food = [...CUSTOM_FOODS,...FOOD_DB].find(f=>f.name===it.name) ||
+            { name:it.name, cat:it.cat||'other', unit:it.unit||'g', per:it.per||100,
+              calories:it.baseCalories||it.calories, protein:it.baseProtein||it.protein,
+              carbs:it.baseCarbs||it.carbs, fat:it.baseFat||it.fat };
+          foodPickerMeal = it.meal || meal.key;
+          openAddFoodModal(idx);
+          setTimeout(()=>openPortionDialog(food),50);
+        }},'✏️');
+        row.appendChild(editBtn);
+        // Zmazať
         const delBtn = h('button',{class:'btn btn-ghost btn-sm', onClick:()=>{
           NUTRITION_LOG[todayKey()].splice(idx,1); saveNutrition(); render();
         }},'✕');
@@ -1894,48 +1923,72 @@ function renderTabNutrition() {
 }
 
 // ── Stav pickera jedál ──
-let foodPickerTab = 'search';   // search | recent | custom | categories
-let foodPickerCat = null;       // vybraná kategória
-let foodPickerMeal = null;      // typ jedla pre pridávané jedlo
+let foodPickerTab = 'suggest';
+let foodPickerCat = null;
+let foodPickerMeal = null;
+let foodPickerEditIdx = null;
 
-function openAddFoodModal() {
+// Návrhy jedál podľa typu
+const MEAL_SUGGESTIONS = {
+  breakfast: ['Ovsené vločky','Vajce','Skyr','Grécky jogurt biely','Tvaroh nízkotučný','Banán','Whey proteín','Cottage cheese'],
+  lunch: ['Kuracie prsia','Ryža biela (varená)','Brokolica','Losos','Šošovica (varená)','Cestoviny (varené)','Morčacie prsia'],
+  dinner: ['Kuracie prsia','Losos','Hovädzie (chudé)','Brokolica','Špenát','Treska','Tofu','Cuketa'],
+  snack: ['Tvaroh polotučný','Mandle','Proteínová tyčinka','Arašidové maslo','Cottage cheese','Banán'],
+};
+function getSuggestedFoods(mealType) {
+  const names = MEAL_SUGGESTIONS[mealType] || [];
+  return names.map(n=>[...CUSTOM_FOODS,...FOOD_DB].find(f=>f.name===n)).filter(Boolean);
+}
+
+function openAddFoodModal(editIdx=null) {
   foodPickerMeal = defaultMealType();
-  foodPickerTab = RECENT_FOODS.length ? 'recent' : 'search';
+  foodPickerTab = 'suggest';
   foodPickerCat = null;
+  foodPickerEditIdx = editIdx;
   renderFoodPicker();
 }
 
 function renderFoodPicker() {
-  const existing = document.querySelector('.modal-overlay');
-  if (existing) existing.remove();
+  document.querySelectorAll('.food-picker-overlay').forEach(o=>o.remove());
+  const overlay = h('div',{class:'food-picker-overlay modal-overlay',style:'align-items:flex-end',onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
+  const sheet = h('div',{style:'background:var(--surf);border-radius:20px 20px 0 0;width:100%;height:72vh;display:flex;flex-direction:column;overflow:hidden'});
 
-  const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
-  const sheet = h('div',{class:'modal-sheet', style:'max-height:88vh'});
-  sheet.appendChild(h('div',{class:'modal-handle'}));
+  // Fixná hlavička
+  const head = h('div',{style:'flex-shrink:0;padding:16px 20px 0'});
+  head.appendChild(h('div',{class:'modal-handle'}));
+  const headRow = h('div',{style:'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px'});
+  headRow.appendChild(h('h2',{},foodPickerEditIdx!=null?'Upraviť jedlo':'Pridať jedlo'));
+  headRow.appendChild(h('button',{class:'btn btn-ghost btn-sm',onClick:closeModal},'Zavrieť'));
+  head.appendChild(headRow);
 
-  // Hlavička + výber typu jedla
-  const head = h('div',{style:'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px'});
-  head.appendChild(h('h2',{},'Pridať jedlo'));
-  head.appendChild(h('button',{class:'btn btn-ghost btn-sm', onClick:closeModal},'Zavrieť'));
+  // Meal type selector
+  const mealSeg = h('div',{class:'segment',style:'margin-bottom:10px'});
+  MEAL_TYPES.forEach(m=>{
+    const btn = h('button',{class:'segment-btn'+(foodPickerMeal===m.key?' active':''),style:'font-size:11px',onClick:()=>{
+      foodPickerMeal=m.key;
+      mealSeg.querySelectorAll('.segment-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      if(foodPickerTab==='suggest') refreshFoodPickerContent();
+    }}, m.icon+' '+m.label);
+    mealSeg.appendChild(btn);
+  });
+  head.appendChild(mealSeg);
+
+  // Taby
+  const tabs = h('div',{style:'display:flex;gap:5px;overflow-x:auto;padding-bottom:10px'});
+  [['suggest','💡 Návrhy'],['search','🔍 Hľadať'],['recent','🕐 Nedávne'],['custom','⭐ Vlastné'],['categories','📂 Všetky']].forEach(([k,label])=>{
+    const btn = h('button',{class:'btn btn-sm '+(foodPickerTab===k?'btn-primary':'btn-outline'),style:'flex-shrink:0',id:'ftab-'+k,onClick:()=>{
+      foodPickerTab=k; foodPickerCat=null; refreshFoodPickerContent();
+    }},label);
+    tabs.appendChild(btn);
+  });
+  head.appendChild(tabs);
   sheet.appendChild(head);
 
-  // Výber typu jedla (raňajky/obed/večera/snack)
-  const mealSeg = h('div',{class:'segment',style:'margin-bottom:12px'});
-  MEAL_TYPES.forEach(m=>{
-    mealSeg.appendChild(h('button',{class:'segment-btn'+(foodPickerMeal===m.key?' active':''), style:'font-size:12px', onClick:()=>{ foodPickerMeal=m.key; renderFoodPicker(); }}, m.icon));
-  });
-  sheet.appendChild(mealSeg);
-
-  // Taby: Hľadať | Nedávne | Vlastné | Kategórie
-  const tabs = h('div',{style:'display:flex;gap:6px;margin-bottom:12px;overflow-x:auto'});
-  [['search','🔍 Hľadať'],['recent','🕐 Nedávne'],['custom','⭐ Vlastné'],['categories','📂 Kategórie']].forEach(([k,label])=>{
-    tabs.appendChild(h('button',{class:'btn btn-sm '+(foodPickerTab===k?'btn-primary':'btn-outline'), style:'flex-shrink:0', onClick:()=>{ foodPickerTab=k; foodPickerCat=null; renderFoodPicker(); }}, label));
-  });
-  sheet.appendChild(tabs);
-
-  // Obsah podľa tabu
-  const content = h('div',{id:'food-picker-content'});
-  sheet.appendChild(content);
+  // Scrollovateľný obsah – scroll je vnútri sheetu, nie na celom viewporte (iOS fix)
+  const contentWrap = h('div',{style:'flex:1;overflow-y:auto;padding:0 20px calc(var(--safeB) + 16px);-webkit-overflow-scrolling:touch'});
+  contentWrap.appendChild(h('div',{id:'food-picker-content'}));
+  sheet.appendChild(contentWrap);
 
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
@@ -1943,307 +1996,226 @@ function renderFoodPicker() {
 }
 
 function refreshFoodPickerContent() {
+  ['suggest','search','recent','custom','categories'].forEach(k=>{
+    const b=document.getElementById('ftab-'+k);
+    if(b) b.className='btn btn-sm '+(foodPickerTab===k?'btn-primary':'btn-outline');
+  });
   const content = document.getElementById('food-picker-content');
   if (!content) return;
   content.innerHTML = '';
 
-  if (foodPickerTab==='search') {
-    // Tlačidlo skenovania čiarového kódu
-    const scanBtn = h('button',{class:'btn btn-outline btn-sm',style:'width:100%;margin-bottom:10px', onClick:()=>startBarcodeScan()},'📷 Naskenovať čiarový kód');
-    content.appendChild(scanBtn);
-    const wrap = h('div',{class:'input-wrap'});
-    const inp = h('input',{type:'text', placeholder:'Napíš názov potraviny...', id:'food-search-input',
-      onInput:()=>refreshSearchResults()});
-    wrap.appendChild(inp);
-    content.appendChild(wrap);
-    const results = h('div',{id:'food-search-results'});
-    content.appendChild(results);
-    setTimeout(()=>{ refreshSearchResults(); }, 50);
+  if (foodPickerTab==='suggest') {
+    if (RECENT_FOODS.length) {
+      content.appendChild(h('p',{class:'section-title',style:'margin-top:8px'},'NEDÁVNE'));
+      RECENT_FOODS.slice(0,4).forEach(food=>content.appendChild(foodRow(food)));
+    }
+    const suggested = getSuggestedFoods(foodPickerMeal);
+    const mealLabel = MEAL_TYPES.find(m=>m.key===foodPickerMeal)?.label?.toUpperCase()||'';
+    content.appendChild(h('p',{class:'section-title'},'ODPORÚČANÉ PRE '+mealLabel));
+    suggested.forEach(food=>content.appendChild(foodRow(food)));
+  }
+  else if (foodPickerTab==='search') {
+    content.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'width:100%;margin-bottom:10px',onClick:()=>startBarcodeScan()},'📷 Skenovať čiarový kód (EAN)'));
+    const wrap=h('div',{class:'input-wrap'});
+    const inp=h('input',{type:'text',placeholder:'Napíš názov potraviny...',id:'food-search-input'});
+    inp.addEventListener('input',()=>refreshSearchResults());
+    wrap.appendChild(inp); content.appendChild(wrap);
+    content.appendChild(h('div',{id:'food-search-results'}));
+    setTimeout(refreshSearchResults, 50);
   }
   else if (foodPickerTab==='recent') {
-    if (!RECENT_FOODS.length) {
-      content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:24px'},'Zatiaľ žiadne nedávne jedlá'));
-    } else {
-      RECENT_FOODS.forEach(food=>content.appendChild(foodRow(food)));
-    }
+    if (!RECENT_FOODS.length) content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:24px'},'Zatiaľ žiadne nedávne'));
+    else RECENT_FOODS.forEach(food=>content.appendChild(foodRow(food)));
   }
   else if (foodPickerTab==='custom') {
-    const addCustomBtn = h('button',{class:'btn btn-outline btn-sm',style:'width:100%;margin-bottom:12px', onClick:()=>openCreateFoodModal()},'+ Vytvoriť vlastnú potravinu');
-    content.appendChild(addCustomBtn);
-    if (!CUSTOM_FOODS.length) {
-      content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:16px'},'Zatiaľ žiadne vlastné potraviny'));
-    } else {
-      CUSTOM_FOODS.forEach((food,i)=>content.appendChild(foodRow(food, ()=>{
-        if(!confirm(`Zmazať "${food.name}"?`)) return;
-        CUSTOM_FOODS.splice(i,1); saveCustomFoods(); refreshFoodPickerContent();
-      })));
-    }
+    content.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'width:100%;margin-bottom:12px',onClick:()=>openCreateFoodModal()},'+ Vytvoriť vlastnú potravinu'));
+    if (!CUSTOM_FOODS.length) content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:16px'},'Zatiaľ žiadne vlastné'));
+    else CUSTOM_FOODS.forEach((food,i)=>content.appendChild(foodRow(food,()=>{ if(!confirm('Zmazať?')) return; CUSTOM_FOODS.splice(i,1); saveCustomFoods(); refreshFoodPickerContent(); })));
   }
   else if (foodPickerTab==='categories') {
     if (!foodPickerCat) {
-      const grid = h('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:8px'});
+      const grid=h('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:8px'});
       Object.entries(FOOD_CATEGORIES).forEach(([key,label])=>{
-        const count = FOOD_DB.filter(f=>f.cat===key).length;
-        if (!count) return;
-        grid.appendChild(h('button',{class:'btn btn-outline',style:'flex-direction:column;padding:14px 8px;height:auto', onClick:()=>{ foodPickerCat=key; refreshFoodPickerContent(); }},[
-          h('div',{style:'font-size:13px;font-weight:700'},label),
-          h('div',{style:'font-size:11px;color:var(--txtDim);margin-top:2px'},`${count} položiek`),
-        ]));
+        const count=FOOD_DB.filter(f=>f.cat===key).length;
+        if(!count) return;
+        const btn=h('button',{class:'btn btn-outline',style:'flex-direction:column;padding:12px 8px;height:auto',onClick:()=>{foodPickerCat=key;refreshFoodPickerContent();}});
+        btn.appendChild(h('div',{style:'font-size:13px;font-weight:700'},label));
+        btn.appendChild(h('div',{style:'font-size:11px;color:var(--txtDim);margin-top:2px'},count+' položiek'));
+        grid.appendChild(btn);
       });
       content.appendChild(grid);
     } else {
-      content.appendChild(h('button',{class:'btn btn-ghost btn-sm',style:'margin-bottom:10px', onClick:()=>{ foodPickerCat=null; refreshFoodPickerContent(); }},'← Späť na kategórie'));
-      content.appendChild(h('p',{class:'section-title',style:'margin-top:0'},FOOD_CATEGORIES[foodPickerCat]));
+      content.appendChild(h('button',{class:'btn btn-ghost btn-sm',style:'margin-bottom:10px',onClick:()=>{foodPickerCat=null;refreshFoodPickerContent();}},'← Späť'));
       FOOD_DB.filter(f=>f.cat===foodPickerCat).forEach(food=>content.appendChild(foodRow(food)));
     }
   }
 }
 
 function refreshSearchResults() {
-  const results = document.getElementById('food-search-results');
-  if (!results) return;
-  const q = (document.getElementById('food-search-input')?.value || '').trim().toLowerCase();
-  results.innerHTML = '';
-  let pool = [...CUSTOM_FOODS, ...FOOD_DB];
-  if (q) {
-    pool = pool.filter(f=>f.name.toLowerCase().includes(q));
-  } else {
-    pool = pool.slice(0, 15); // bez query ukáž prvých pár
-  }
-  if (!pool.length) {
-    results.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:24px'},'Nič sa nenašlo. Skús iný názov alebo vytvor vlastnú potravinu.'));
-    return;
-  }
+  const results=document.getElementById('food-search-results');
+  if(!results) return;
+  const q=(document.getElementById('food-search-input')?.value||'').trim().toLowerCase();
+  results.innerHTML='';
+  let pool=[...CUSTOM_FOODS,...FOOD_DB];
+  if(q) pool=pool.filter(f=>f.name.toLowerCase().includes(q));
+  else pool=pool.slice(0,12);
+  if(!pool.length) { results.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:24px'},'Nič sa nenašlo.')); return; }
   pool.slice(0,40).forEach(food=>results.appendChild(foodRow(food)));
 }
 
-// Riadok potraviny – klik otvorí dialóg s gramážou
 function foodRow(food, onDelete) {
-  const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center;justify-content:space-between'});
-  const left = h('div',{style:'flex:1;min-width:0', onClick:()=>openPortionDialog(food)});
+  const row=h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center'});
+  const left=h('div',{style:'flex:1;min-width:0;cursor:pointer',onClick:()=>openPortionDialog(food)});
   left.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:14px'},food.name));
-  const perLabel = food.unit==='ks' ? '1 ks' : `${food.per}g`;
-  left.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:3px'},`${food.calories} kcal / ${perLabel} · B:${food.protein} S:${food.carbs} T:${food.fat}`));
+  const perLabel=food.unit==='ks'?'1 ks':food.per+'g';
+  left.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:3px'},food.calories+' kcal/'+perLabel+' · B:'+food.protein+' S:'+food.carbs+' T:'+food.fat));
   row.appendChild(left);
-  if (onDelete) {
-    row.appendChild(h('button',{class:'btn btn-ghost btn-sm',style:'color:var(--red)', onClick:onDelete},'🗑'));
-  } else {
-    row.appendChild(h('span',{style:'color:var(--pri);font-size:18px', onClick:()=>openPortionDialog(food)},'+'));
-  }
+  if(onDelete) row.appendChild(h('button',{class:'btn btn-ghost btn-sm',style:'color:var(--red)',onClick:onDelete},'🗑'));
+  else row.appendChild(h('span',{style:'color:var(--pri);font-size:22px;padding:0 4px;cursor:pointer',onClick:()=>openPortionDialog(food)},'+'));
   return row;
 }
 
-// Dialóg na zadanie gramáže/počtu kusov
 function openPortionDialog(food) {
-  const overlay = h('div',{class:'modal-overlay', style:'z-index:320;align-items:center', onClick:(e)=>{ if(e.target===overlay) overlay.remove(); }});
-  const sheet = h('div',{class:'modal-sheet', style:'border-radius:20px;margin:0 16px;max-width:380px'});
+  document.querySelectorAll('.food-picker-overlay').forEach(o=>o.remove());
+  const isKs=food.unit==='ks';
+  let amount=isKs?1:food.per;
+  if(foodPickerEditIdx!=null){ const ex=(NUTRITION_LOG[todayKey()]||[])[foodPickerEditIdx]; if(ex) amount=ex.amount||amount; }
+
+  const overlay=h('div',{class:'modal-overlay',style:'z-index:320;align-items:flex-end',onClick:(e)=>{ if(e.target===overlay){ overlay.remove(); renderFoodPicker(); } }});
+  const sheet=h('div',{style:'background:var(--surf);border-radius:20px 20px 0 0;width:100%;padding:20px 20px calc(var(--safeB)+20px)'});
   sheet.appendChild(h('div',{class:'modal-handle'}));
-  sheet.appendChild(h('h2',{style:'margin-bottom:4px'},food.name));
+  sheet.appendChild(h('h2',{style:'margin-bottom:2px'},food.name));
+  sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:10px'},isKs?'Počet kusov':'Gramáž'));
 
-  const isKs = food.unit==='ks';
-  let amount = isKs ? 1 : food.per; // default = 1 kus alebo referenčné g
+  const preview=h('div',{class:'card card-accent',style:'margin-bottom:10px'});
+  function updatePreview(){ preview.innerHTML=''; const m=computeFoodMacros(food,amount); preview.appendChild(h('div',{style:'color:var(--pri);font-size:22px;font-weight:800'},m.calories+' kcal')); preview.appendChild(h('div',{style:'color:var(--txtDim);font-size:13px;margin-top:4px'},'B: '+m.protein+'g · S: '+m.carbs+'g · T: '+m.fat+'g')); }
+  updatePreview(); sheet.appendChild(preview);
 
-  sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'}, isKs?'Počet kusov':'Množstvo v gramoch'));
+  const step=isKs?1:10;
+  const sr=h('div',{class:'stepper-row',style:'margin-bottom:10px'});
+  sr.appendChild(h('button',{class:'stepper-btn',onClick:()=>{ amount=Math.max(isKs?1:5,amount-step); inp.value=amount; updatePreview(); }},'−'));
+  const inp=h('input',{class:'stepper-val',type:'number',inputmode:'decimal',value:amount,id:'portion-input'});
+  inp.addEventListener('input',(e)=>{ amount=parseFloat(e.target.value)||0; updatePreview(); });
+  sr.appendChild(inp);
+  sr.appendChild(h('button',{class:'stepper-btn',onClick:()=>{ amount+=step; inp.value=amount; updatePreview(); }},'+'));
+  sheet.appendChild(sr);
 
-  // Náhľad makier (živý prepočet)
-  const preview = h('div',{class:'card card-accent',style:'margin-bottom:14px'});
-  function updatePreview() {
-    preview.innerHTML='';
-    const m = computeFoodMacros(food, amount);
-    preview.appendChild(h('div',{style:'color:var(--pri);font-size:24px;font-weight:800'},`${m.calories} kcal`));
-    preview.appendChild(h('div',{style:'color:var(--txtDim);font-size:13px;margin-top:4px'},`B: ${m.protein}g · S: ${m.carbs}g · T: ${m.fat}g`));
-  }
-  updatePreview();
-  sheet.appendChild(preview);
-
-  // Stepper na množstvo
-  const step = isKs ? 1 : 10;
-  const stepRow = h('div',{class:'stepper-row',style:'margin-bottom:12px'});
-  stepRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>{ amount=Math.max(isKs?1:5, amount-step); document.getElementById('portion-input').value=amount; updatePreview(); }},'−'));
-  const amountInput = h('input',{class:'stepper-val',type:'number',inputmode:'decimal',value:amount,id:'portion-input',
-    onInput:(e)=>{ amount=parseFloat(e.target.value)||0; updatePreview(); }});
-  stepRow.appendChild(amountInput);
-  stepRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>{ amount=amount+step; document.getElementById('portion-input').value=amount; updatePreview(); }},'+'));
-  sheet.appendChild(stepRow);
-
-  // Rýchle voľby gramáže
-  if (!isKs) {
-    const quick = h('div',{style:'display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap'});
-    [50,100,150,200,250].forEach(g=>{
-      quick.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'flex:1', onClick:()=>{ amount=g; document.getElementById('portion-input').value=g; updatePreview(); }},`${g}g`));
-    });
+  if(!isKs){
+    const quick=h('div',{style:'display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap'});
+    [50,100,150,200,250].forEach(g=>{ quick.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'flex:1',onClick:()=>{ amount=g; inp.value=g; updatePreview(); }},g+'g')); });
     sheet.appendChild(quick);
   }
 
-  sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
-    if (amount<=0) return;
-    logFood(food, amount, foodPickerMeal);
-    overlay.remove();
-    closeModal();
-    render();
-  }},'Pridať do denníka'));
-
-  overlay.appendChild(sheet);
-  document.body.appendChild(overlay);
+  const btnLabel=foodPickerEditIdx!=null?'Uložiť zmenu':'Pridať do denníka';
+  sheet.appendChild(h('button',{class:'btn btn-primary',onClick:()=>{
+    if(amount<=0) return;
+    if(!NUTRITION_LOG[todayKey()]) NUTRITION_LOG[todayKey()]=[];
+    const macros=computeFoodMacros(food,amount);
+    const entry={name:food.name,amount,unit:food.unit,per:food.per,baseCalories:food.calories,baseProtein:food.protein,baseCarbs:food.carbs,baseFat:food.fat,...macros,meal:foodPickerMeal,cat:food.cat};
+    if(foodPickerEditIdx!=null){ NUTRITION_LOG[todayKey()][foodPickerEditIdx]=entry; }
+    else {
+      NUTRITION_LOG[todayKey()].push(entry);
+      RECENT_FOODS=RECENT_FOODS.filter(f=>f.name!==food.name);
+      RECENT_FOODS.unshift({name:food.name,cat:food.cat,unit:food.unit,per:food.per,calories:food.calories,protein:food.protein,carbs:food.carbs,fat:food.fat});
+      if(RECENT_FOODS.length>12) RECENT_FOODS=RECENT_FOODS.slice(0,12);
+      saveRecentFoods();
+    }
+    saveNutrition(); overlay.remove(); closeModal();
+    showToast(foodPickerEditIdx!=null?'✓ Zmenené':'✓ Pridané');
+    foodPickerEditIdx=null; render();
+  }},btnLabel));
+  overlay.appendChild(sheet); document.body.appendChild(overlay);
 }
 
-// Dialóg na vytvorenie vlastnej potraviny
 function openCreateFoodModal() {
-  const overlay = h('div',{class:'modal-overlay', style:'z-index:320', onClick:(e)=>{ if(e.target===overlay) overlay.remove(); }});
-  const sheet = h('div',{class:'modal-sheet'});
+  document.querySelectorAll('.food-picker-overlay').forEach(o=>o.remove());
+  const overlay=h('div',{class:'modal-overlay',style:'z-index:320;align-items:flex-end',onClick:(e)=>{ if(e.target===overlay){ overlay.remove(); renderFoodPicker(); } }});
+  const sheet=h('div',{style:'background:var(--surf);border-radius:20px 20px 0 0;width:100%;padding:20px 20px calc(var(--safeB)+20px);max-height:85vh;overflow-y:auto'});
   sheet.appendChild(h('div',{class:'modal-handle'}));
   sheet.appendChild(h('h2',{style:'margin-bottom:4px'},'Vlastná potravina'));
-  sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Zadaj hodnoty na 100g (alebo na 1 kus).'));
-
-  const fields = [
-    ['Názov','name','text',''],
-    ['Kalórie (kcal)','calories','number',''],
-    ['Bielkoviny (g)','protein','number',''],
-    ['Sacharidy (g)','carbs','number',''],
-    ['Tuky (g)','fat','number',''],
-  ];
-  fields.forEach(([label,key,type])=>{
+  sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Hodnoty na 100g alebo na 1 kus.'));
+  [['Názov','name','text'],['Kalórie (kcal)','calories','number'],['Bielkoviny (g)','protein','number'],['Sacharidy (g)','carbs','number'],['Tuky (g)','fat','number']].forEach(([label,key,type])=>{
     sheet.appendChild(h('label',{class:'input-label'},label));
-    const wrap = h('div',{class:'input-wrap'});
-    wrap.appendChild(h('input',{type, inputmode: type==='number'?'decimal':'text', 'data-fkey':key, id:`cf-${key}`}));
-    sheet.appendChild(wrap);
+    const wrap=h('div',{class:'input-wrap'}); wrap.appendChild(h('input',{type,inputmode:type==='number'?'decimal':'text',id:'cf-'+key})); sheet.appendChild(wrap);
   });
-
-  // Jednotka
   sheet.appendChild(h('label',{class:'input-label'},'Jednotka'));
-  let cfUnit = 'g';
-  const unitSeg = h('div',{class:'segment',style:'margin-bottom:14px'});
+  let cfUnit='g';
+  const useg=h('div',{class:'segment',style:'margin-bottom:14px'});
   [['g','Na 100g'],['ks','Na 1 kus']].forEach(([k,label])=>{
-    const b = h('button',{class:'segment-btn'+(cfUnit===k?' active':''), onClick:()=>{ cfUnit=k; unitSeg.querySelectorAll('.segment-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); }}, label);
-    unitSeg.appendChild(b);
+    const b=h('button',{class:'segment-btn'+(cfUnit===k?' active':''),onClick:()=>{ cfUnit=k; useg.querySelectorAll('.segment-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); }},label);
+    useg.appendChild(b);
   });
-  sheet.appendChild(unitSeg);
-
-  sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
-    const name = document.getElementById('cf-name')?.value.trim();
-    const calories = parseFloat(document.getElementById('cf-calories')?.value)||0;
-    const protein = parseFloat(document.getElementById('cf-protein')?.value)||0;
-    const carbs = parseFloat(document.getElementById('cf-carbs')?.value)||0;
-    const fat = parseFloat(document.getElementById('cf-fat')?.value)||0;
-    if (!name) { alert('Zadaj názov potraviny.'); return; }
-    const food = { name, cat:'other', unit:cfUnit, per: cfUnit==='ks'?1:100, calories, protein, carbs, fat, custom:true };
-    CUSTOM_FOODS.unshift(food);
-    saveCustomFoods();
-    overlay.remove();
-    foodPickerTab='custom';
-    renderFoodPicker();
+  sheet.appendChild(useg);
+  sheet.appendChild(h('button',{class:'btn btn-primary',onClick:()=>{
+    const name=document.getElementById('cf-name')?.value.trim();
+    if(!name){alert('Zadaj názov.');return;}
+    const food={name,cat:'other',unit:cfUnit,per:cfUnit==='ks'?1:100,calories:parseFloat(document.getElementById('cf-calories')?.value)||0,protein:parseFloat(document.getElementById('cf-protein')?.value)||0,carbs:parseFloat(document.getElementById('cf-carbs')?.value)||0,fat:parseFloat(document.getElementById('cf-fat')?.value)||0,custom:true};
+    CUSTOM_FOODS.unshift(food); saveCustomFoods(); overlay.remove(); foodPickerTab='custom'; renderFoodPicker();
   }},'Uložiť potravinu'));
-
-  overlay.appendChild(sheet);
-  document.body.appendChild(overlay);
+  overlay.appendChild(sheet); document.body.appendChild(overlay);
 }
 
-// ── ČIAROVÝ KÓD (EAN) + OpenFoodFacts ──
-let barcodeReader = null;
+let barcodeReader=null;
 
 function startBarcodeScan() {
-  if (typeof ZXing === 'undefined') {
-    alert('Skener sa nenačítal. Skontroluj pripojenie na internet a skús znova.');
-    return;
+  document.querySelectorAll('.food-picker-overlay').forEach(o=>o.remove());
+  const overlay=h('div',{class:'modal-overlay',style:'z-index:320;align-items:flex-end',onClick:(e)=>{ if(e.target===overlay){ if(barcodeReader){try{barcodeReader.reset();}catch(e){} barcodeReader=null;} overlay.remove(); renderFoodPicker(); } }});
+  const sheet=h('div',{style:'background:var(--surf);border-radius:20px 20px 0 0;width:100%;padding:20px 20px calc(var(--safeB)+20px)'});
+  sheet.appendChild(h('div',{class:'modal-handle'}));
+  sheet.appendChild(h('h2',{style:'margin-bottom:6px'},'Skenovanie EAN'));
+  sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:12px'},'Zadaj kód zo škatule, alebo naskenovaj kamerou.'));
+
+  // Manuálne – primárne
+  const mr=h('div',{style:'display:flex;gap:8px;margin-bottom:16px'});
+  const mw=h('div',{class:'input-wrap',style:'flex:1;margin-bottom:0'});
+  const mi=h('input',{type:'number',inputmode:'numeric',placeholder:'EAN kód (8–13 číslic)',id:'ean-input'});
+  mw.appendChild(mi); mr.appendChild(mw);
+  mr.appendChild(h('button',{class:'btn btn-primary btn-sm',onClick:()=>{ const ean=(document.getElementById('ean-input')?.value||'').trim(); if(!ean){alert('Zadaj kód.');return;} overlay.remove(); lookupBarcode(ean); }},'Hľadať'));
+  sheet.appendChild(mr);
+
+  // Kamera – ak ZXing dostupný a https
+  if(typeof ZXing!=='undefined') {
+    sheet.appendChild(h('p',{class:'section-title'},'KAMERA'));
+    const vw=h('div',{style:'position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;margin-bottom:8px'});
+    const video=h('video',{id:'scan-video',style:'width:100%;height:100%;object-fit:cover'});
+    video.setAttribute('playsinline','true'); video.setAttribute('muted','true');
+    vw.appendChild(video);
+    vw.appendChild(h('div',{style:'position:absolute;top:50%;left:10%;right:10%;height:2px;background:var(--pri);box-shadow:0 0 10px var(--pri);transform:translateY(-50%)'}));
+    sheet.appendChild(vw);
+    sheet.appendChild(h('p',{id:'scan-status',style:'color:var(--txtDim);font-size:12px;text-align:center;margin-bottom:10px'},'Spúšťam kameru...'));
+    try {
+      barcodeReader=new ZXing.BrowserMultiFormatReader();
+      barcodeReader.decodeFromVideoDevice(null,'scan-video',(result,err)=>{
+        if(result){ const code=result.getText(); if(barcodeReader){try{barcodeReader.reset();}catch(e){} barcodeReader=null;} overlay.remove(); lookupBarcode(code); }
+      }).then(()=>{ const s=document.getElementById('scan-status'); if(s) s.textContent='Namieriť kameru na čiarový kód'; }).catch(e=>{ const s=document.getElementById('scan-status'); if(s) s.textContent='Kamera nedostupná – použi manuálne zadanie vyššie.'; });
+    } catch(e){}
+  } else {
+    sheet.appendChild(h('p',{style:'color:var(--txtFaint);font-size:12px;text-align:center;margin-bottom:10px'},'Kamera dostupná len na https://'));
   }
-  const overlay = h('div',{class:'modal-overlay', style:'z-index:340;align-items:center;background:#000e', onClick:(e)=>{ if(e.target===overlay) stopBarcodeScan(overlay); }});
-  const box = h('div',{style:'width:100%;max-width:420px;padding:0 16px'});
-
-  box.appendChild(h('h2',{style:'color:#fff;text-align:center;margin-bottom:12px'},'Naskenuj čiarový kód'));
-  const videoWrap = h('div',{style:'position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:4/3'});
-  const video = h('video',{id:'scan-video',style:'width:100%;height:100%;object-fit:cover',playsinline:'true'});
-  videoWrap.appendChild(video);
-  // Zameriavací rámik
-  videoWrap.appendChild(h('div',{style:'position:absolute;top:50%;left:10%;right:10%;height:2px;background:var(--pri);box-shadow:0 0 12px var(--pri);transform:translateY(-50%)'}));
-  box.appendChild(videoWrap);
-
-  const status = h('p',{id:'scan-status',style:'color:#fff;text-align:center;font-size:13px;margin-top:12px'},'Namier kameru na čiarový kód produktu');
-  box.appendChild(status);
-
-  // Manuálne zadanie kódu (fallback)
-  const manualWrap = h('div',{style:'display:flex;gap:8px;margin-top:12px'});
-  const manualInp = h('input',{type:'number',inputmode:'numeric',placeholder:'alebo zadaj EAN ručne', id:'manual-ean',
-    style:'flex:1;background:var(--surf2);border:1px solid var(--border2);border-radius:10px;color:var(--txt);padding:11px;font-size:14px;outline:none'});
-  manualWrap.appendChild(manualInp);
-  manualWrap.appendChild(h('button',{class:'btn btn-primary btn-sm', onClick:()=>{
-    const ean = document.getElementById('manual-ean')?.value.trim();
-    if (ean) { stopBarcodeScan(overlay); lookupBarcode(ean); }
-  }},'Hľadať'));
-  box.appendChild(manualWrap);
-
-  box.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:12px', onClick:()=>stopBarcodeScan(overlay)},'Zrušiť'));
-
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-
-  // Spusti skener
-  try {
-    barcodeReader = new ZXing.BrowserMultiFormatReader();
-    barcodeReader.decodeFromVideoDevice(null, 'scan-video', (result, err)=>{
-      if (result) {
-        const code = result.getText();
-        stopBarcodeScan(overlay);
-        lookupBarcode(code);
-      }
-    }).catch(e=>{
-      const st = document.getElementById('scan-status');
-      if (st) st.textContent = 'Nepodarilo sa spustiť kameru. Povoľ prístup ku kamere alebo zadaj kód ručne.';
-    });
-  } catch(e) {
-    const st = document.getElementById('scan-status');
-    if (st) st.textContent = 'Skener nie je dostupný. Zadaj kód ručne.';
-  }
+  sheet.appendChild(h('button',{class:'btn btn-ghost',onClick:()=>{ if(barcodeReader){try{barcodeReader.reset();}catch(e){} barcodeReader=null;} overlay.remove(); renderFoodPicker(); }},'Zrušiť'));
+  overlay.appendChild(sheet); document.body.appendChild(overlay);
 }
 
-function stopBarcodeScan(overlay) {
-  if (barcodeReader) {
-    try { barcodeReader.reset(); } catch(e){}
-    barcodeReader = null;
-  }
-  if (overlay) overlay.remove();
-}
-
-// Vyhľadá produkt v OpenFoodFacts podľa EAN
 async function lookupBarcode(ean) {
-  // Zobraz loading
-  const loadingOverlay = h('div',{class:'modal-overlay', style:'z-index:340;align-items:center', onClick:(e)=>{ if(e.target===loadingOverlay) loadingOverlay.remove(); }});
-  const loadBox = h('div',{class:'modal-sheet', style:'border-radius:20px;margin:0 16px;max-width:380px;text-align:center;padding:32px 20px'});
-  loadBox.appendChild(h('div',{style:'font-size:32px;margin-bottom:12px'},'🔍'));
-  loadBox.appendChild(h('div',{id:'lookup-status',style:'color:var(--txt);font-size:14px'},`Hľadám produkt ${ean}...`));
-  loadingOverlay.appendChild(loadBox);
-  document.body.appendChild(loadingOverlay);
-
+  const lo=h('div',{class:'modal-overlay',style:'z-index:340;align-items:center'});
+  const lb=h('div',{style:'background:var(--surf);border-radius:20px;margin:0 32px;padding:32px 20px;text-align:center'});
+  lb.appendChild(h('div',{style:'font-size:32px;margin-bottom:12px'},'🔍'));
+  lb.appendChild(h('div',{style:'color:var(--txt);font-size:14px'},'Hľadám '+ean+'...'));
+  lo.appendChild(lb); document.body.appendChild(lo);
   try {
-    const resp = await fetch(`https://world.openfoodfacts.org/api/v2/product/${ean}.json?fields=product_name,nutriments,quantity`);
-    const data = await resp.json();
-    loadingOverlay.remove();
-
-    if (data.status===1 && data.product) {
-      const p = data.product;
-      const n = p.nutriments || {};
-      const food = {
-        name: p.product_name || `Produkt ${ean}`,
-        cat: 'other', unit: 'g', per: 100,
-        calories: Math.round(n['energy-kcal_100g'] || n['energy-kcal'] || 0),
-        protein: Math.round((n.proteins_100g||0)*10)/10,
-        carbs: Math.round((n.carbohydrates_100g||0)*10)/10,
-        fat: Math.round((n.fat_100g||0)*10)/10,
-      };
-      if (!food.calories && !food.protein) {
-        alert(`Produkt "${food.name}" sa našiel, ale nemá výživové údaje v databáze. Zadaj ho ručne.`);
-        return;
-      }
+    const resp=await fetch('https://world.openfoodfacts.org/api/v2/product/'+ean+'.json?fields=product_name,nutriments');
+    const data=await resp.json();
+    lo.remove();
+    if(data.status===1&&data.product){
+      const p=data.product; const n=p.nutriments||{};
+      const food={name:p.product_name||'Produkt '+ean,cat:'other',unit:'g',per:100,calories:Math.round(n['energy-kcal_100g']||0),protein:Math.round((n.proteins_100g||0)*10)/10,carbs:Math.round((n.carbohydrates_100g||0)*10)/10,fat:Math.round((n.fat_100g||0)*10)/10};
+      if(!food.calories&&!food.protein){alert('"'+food.name+'" nemá výživové údaje. Zadaj ručne.'); renderFoodPicker(); return;}
       openPortionDialog(food);
     } else {
-      // Nenašlo sa – ponúkni manuálne vytvorenie
-      if (confirm(`Produkt s kódom ${ean} sa nenašiel v databáze OpenFoodFacts. Chceš ho pridať ako vlastnú potravinu?`)) {
-        openCreateFoodModal();
-      }
+      if(confirm('Produkt '+ean+' sa nenašiel. Zadať ručne?')) openCreateFoodModal();
+      else renderFoodPicker();
     }
-  } catch(e) {
-    loadingOverlay.remove();
-    alert('Chyba pri hľadaní produktu. Skontroluj pripojenie na internet.');
-  }
+  } catch(e){ lo.remove(); alert('Chyba internetu.'); renderFoodPicker(); }
 }
 
 function closeModal() {
@@ -2253,26 +2225,55 @@ function closeModal() {
 // ───────────────────────── TAB: STATS ──────────────────────────────────
 let statsSelectedEx = null;
 let chartInstance = null;
+let bodyChartInstance = null;
+let statsSubView = 'training'; // training | body | week
+let bodyMetric = 'weightKg';   // ktorá miera sa zobrazuje v grafe
 
 function renderTabStats() {
   const wrap = h('div',{class:'scroll'});
   wrap.appendChild(h('h1',{},'Štatistiky'));
 
+  // Podzáložky
+  const sub = h('div',{class:'segment',style:'margin-top:16px;margin-bottom:4px'});
+  [['training','Tréning'],['body','Telo'],['week','Týždeň']].forEach(([k,label])=>{
+    sub.appendChild(h('button',{class:'segment-btn'+(statsSubView===k?' active':''), onClick:()=>{ statsSubView=k; render(); }}, label));
+  });
+  wrap.appendChild(sub);
+
+  if (statsSubView==='training') renderStatsTraining(wrap);
+  else if (statsSubView==='body') renderStatsBody(wrap);
+  else if (statsSubView==='week') renderStatsWeek(wrap);
+
+  return wrap;
+}
+
+function renderStatsTraining(wrap) {
   if (!HISTORY.length) {
     const empty = h('div',{class:'empty-state'});
     empty.appendChild(h('div',{class:'empty-emoji'},'📊'));
     empty.appendChild(h('div',{class:'empty-title'},'Štatistiky sa zobrazia po prvom tréningu'));
-    empty.appendChild(h('div',{class:'empty-sub'},'PR rekordy, grafy progresu, obvody v čase'));
+    empty.appendChild(h('div',{class:'empty-sub'},'PR rekordy a grafy progresu cvikov'));
     wrap.appendChild(empty);
-    return wrap;
+    return;
   }
 
-  const allExercises = DAYS.flatMap(d=>d.exercises);
-  if (!statsSelectedEx) statsSelectedEx = allExercises[0].id;
+  // Zoznam cvikov ktoré majú históriu
+  const exIdsInHistory = new Set();
+  HISTORY.forEach(e=>Object.keys(e.data||{}).forEach(id=>{ if(id!=='_startedAt') exIdsInHistory.add(id); }));
+  const allExercises = [];
+  exIdsInHistory.forEach(id=>{
+    const ex = getExerciseById(id);
+    if (ex) allExercises.push(ex);
+  });
+  if (!allExercises.length) {
+    wrap.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:24px'},'Žiadne dáta o cvikoch'));
+    return;
+  }
+  if (!statsSelectedEx || !allExercises.find(e=>e.id===statsSelectedEx)) statsSelectedEx = allExercises[0].id;
 
   wrap.appendChild(h('p',{class:'section-title'},'PROGRES VÁHY'));
   const chartCard = h('div',{class:'card'});
-  const select = h('select',{class:'rir-select', style:'width:100%;text-align:left;padding:10px;margin-bottom:12px',
+  const select = h('select',{style:'width:100%;text-align:left;padding:11px;margin-bottom:12px;background:var(--surf2);border:1px solid var(--border2);color:var(--txt);border-radius:10px;font-size:14px',
     onChange:(e)=>{ statsSelectedEx=e.target.value; render(); }});
   allExercises.forEach(ex=>{
     const opt = h('option',{value:ex.id},ex.name);
@@ -2283,7 +2284,6 @@ function renderTabStats() {
   const canvas = h('canvas',{id:'progressChart',height:'180'});
   chartCard.appendChild(canvas);
   wrap.appendChild(chartCard);
-
   setTimeout(()=>renderChart(statsSelectedEx), 30);
 
   wrap.appendChild(h('p',{class:'section-title'},'OSOBNÉ REKORDY (PR)'));
@@ -2295,13 +2295,11 @@ function renderTabStats() {
     anyPR = true;
     const row = h('div',{class:'stat-row'});
     row.appendChild(h('span',{class:'stat-label'},ex.name));
-    row.appendChild(h('span',{class:'stat-value',style:'color:var(--pri)'},`${pr.weight}kg × ${pr.reps}`));
+    row.appendChild(h('span',{class:'stat-value',style:'color:var(--pri)'},`${displayWeight(parseFloat(pr.weight))}${weightUnit()} × ${pr.reps}`));
     prCard.appendChild(row);
   });
   if (!anyPR) prCard.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px'},'Žiadne PR zatiaľ'));
   wrap.appendChild(prCard);
-
-  return wrap;
 }
 
 function renderChart(exId) {
@@ -2315,15 +2313,236 @@ function renderChart(exId) {
     const maxW = Math.max(...sets.map(s=>parseFloat(s.weight||0)));
     const d = new Date(e.date);
     labels.push(`${d.getDate()}.${d.getMonth()+1}`);
-    values.push(maxW);
+    values.push(PROFILE.units==='imperial' ? kgToLbs(maxW) : maxW);
   });
   if (!labels.length) return;
   const priColor = getComputedStyle(document.documentElement).getPropertyValue('--pri').trim();
   chartInstance = new Chart(canvas, {
     type:'line',
-    data:{ labels, datasets:[{ label:'Max váha (kg)', data:values, borderColor:priColor, backgroundColor:priColor+'22', pointBackgroundColor:priColor, pointRadius:5, tension:0.3, fill:true }] },
+    data:{ labels, datasets:[{ label:`Max váha (${weightUnit()})`, data:values, borderColor:priColor, backgroundColor:priColor+'22', pointBackgroundColor:priColor, pointRadius:5, tension:0.3, fill:true }] },
     options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}}, y:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}} } }
   });
+}
+
+// ── ŠTATISTIKY: TELO ──
+const BODY_METRICS = [
+  {key:'weightKg', label:'Hmotnosť', unit:()=>weightUnit(), conv:(v)=>PROFILE.units==='imperial'?kgToLbs(v):v},
+  {key:'bodyFatPct', label:'Telesný tuk', unit:()=>'%', conv:(v)=>v},
+  {key:'waistCm', label:'Pás', unit:()=>lengthUnit(), conv:(v)=>PROFILE.units==='imperial'?cmToInch(v):v},
+  {key:'chestCm', label:'Hrudník', unit:()=>lengthUnit(), conv:(v)=>PROFILE.units==='imperial'?cmToInch(v):v},
+  {key:'bicepCm', label:'Biceps', unit:()=>lengthUnit(), conv:(v)=>PROFILE.units==='imperial'?cmToInch(v):v},
+  {key:'thighCm', label:'Stehno', unit:()=>lengthUnit(), conv:(v)=>PROFILE.units==='imperial'?cmToInch(v):v},
+];
+
+function renderStatsBody(wrap) {
+  // Tlačidlo pridať záznam
+  wrap.appendChild(h('button',{class:'btn btn-primary',style:'margin-top:14px;margin-bottom:6px', onClick:()=>openBodyLogModal()},'+ Zaznamenať mieru'));
+
+  if (!BODY_LOG.length) {
+    const empty = h('div',{class:'empty-state'});
+    empty.appendChild(h('div',{class:'empty-emoji'},'📏'));
+    empty.appendChild(h('div',{class:'empty-title'},'Zatiaľ žiadne záznamy tela'));
+    empty.appendChild(h('div',{class:'empty-sub'},'Zaznamenaj váhu a obvody, sleduj zmeny v čase'));
+    wrap.appendChild(empty);
+    return;
+  }
+
+  // Výber metriky
+  const metricsWithData = BODY_METRICS.filter(m=>BODY_LOG.some(e=>e[m.key]!=null));
+  if (!metricsWithData.find(m=>m.key===bodyMetric)) bodyMetric = metricsWithData[0]?.key || 'weightKg';
+
+  const metricRow = h('div',{style:'display:flex;gap:6px;overflow-x:auto;margin:14px 0 10px'});
+  metricsWithData.forEach(m=>{
+    metricRow.appendChild(h('button',{class:'btn btn-sm '+(bodyMetric===m.key?'btn-primary':'btn-outline'),style:'flex-shrink:0', onClick:()=>{ bodyMetric=m.key; render(); }}, m.label));
+  });
+  wrap.appendChild(metricRow);
+
+  // Graf
+  const chartCard = h('div',{class:'card'});
+  const canvas = h('canvas',{id:'bodyChart',height:'180'});
+  chartCard.appendChild(canvas);
+  wrap.appendChild(chartCard);
+  setTimeout(()=>renderBodyChart(bodyMetric), 30);
+
+  // Zmena od začiatku
+  const metric = BODY_METRICS.find(m=>m.key===bodyMetric);
+  const withVals = BODY_LOG.filter(e=>e[bodyMetric]!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if (withVals.length>=2) {
+    const first = withVals[0][bodyMetric];
+    const last = withVals[withVals.length-1][bodyMetric];
+    const diff = Math.round((last-first)*10)/10;
+    const card = h('div',{class:'card',style:'margin-top:10px;display:flex;justify-content:space-between;align-items:center'});
+    card.appendChild(h('div',{},[
+      h('div',{style:'color:var(--txtDim);font-size:12px'},'Zmena od začiatku'),
+      h('div',{style:`color:${diff===0?'var(--txt)':(diff>0?'var(--green)':'var(--pri)')};font-size:20px;font-weight:800;margin-top:2px`},
+        `${diff>0?'+':''}${metric.conv(diff).toFixed(1)} ${metric.unit()}`),
+    ]));
+    card.appendChild(h('div',{style:'text-align:right'},[
+      h('div',{style:'color:var(--txtDim);font-size:11px'},`Teraz: ${metric.conv(last).toFixed(1)} ${metric.unit()}`),
+      h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:2px'},`Štart: ${metric.conv(first).toFixed(1)} ${metric.unit()}`),
+    ]));
+    wrap.appendChild(card);
+  }
+
+  // História záznamov
+  wrap.appendChild(h('p',{class:'section-title'},'HISTÓRIA ZÁZNAMOV'));
+  const months=['jan','feb','mar','apr','máj','jún','júl','aug','sep','okt','nov','dec'];
+  BODY_LOG.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).forEach((entry,i)=>{
+    const d = new Date(entry.date);
+    const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;justify-content:space-between;align-items:center'});
+    const left = h('div',{style:'flex:1'});
+    left.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:13px'},`${d.getDate()}. ${months[d.getMonth()]} ${d.getFullYear()}`));
+    const parts = [];
+    if (entry.weightKg!=null) parts.push(`${displayWeight(entry.weightKg)}${weightUnit()}`);
+    if (entry.bodyFatPct!=null) parts.push(`${entry.bodyFatPct}% tuk`);
+    if (entry.waistCm!=null) parts.push(`pás ${PROFILE.units==='imperial'?cmToInch(entry.waistCm):entry.waistCm}${lengthUnit()}`);
+    left.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:3px'}, parts.join(' · ')||'—'));
+    row.appendChild(left);
+    const idx = BODY_LOG.indexOf(entry);
+    row.appendChild(h('button',{class:'btn btn-ghost btn-sm',style:'color:var(--red)', onClick:()=>{
+      if(!confirm('Zmazať tento záznam?')) return;
+      BODY_LOG.splice(idx,1); saveBodyLog(); render();
+    }},'🗑'));
+    wrap.appendChild(row);
+  });
+}
+
+function renderBodyChart(metricKey) {
+  const canvas = document.getElementById('bodyChart');
+  if (!canvas || typeof Chart==='undefined') return;
+  if (bodyChartInstance) { bodyChartInstance.destroy(); bodyChartInstance=null; }
+  const metric = BODY_METRICS.find(m=>m.key===metricKey);
+  const sorted = BODY_LOG.filter(e=>e[metricKey]!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if (!sorted.length) return;
+  // Ak len 1 bod, pridaj ho dvakrát aby sa čiara zobrazila
+  const labels = sorted.map(e=>{ const d=new Date(e.date); return `${d.getDate()}.${d.getMonth()+1}`; });
+  const values = sorted.map(e=>metric.conv(e[metricKey]));
+  if (sorted.length===1) { labels.push(labels[0]); values.push(values[0]); }
+  const priColor = getComputedStyle(document.documentElement).getPropertyValue('--pri').trim();
+  bodyChartInstance = new Chart(canvas, {
+    type:'line',
+    data:{ labels, datasets:[{ label:`${metric.label} (${metric.unit()})`, data:values, borderColor:priColor, backgroundColor:priColor+'22', pointBackgroundColor:priColor, pointRadius:6, tension:0.3, fill:true }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}}, y:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}} } }
+  });
+}
+
+function openBodyLogModal() {
+  const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
+  const sheet = h('div',{class:'modal-sheet'});
+  sheet.appendChild(h('div',{class:'modal-handle'}));
+  sheet.appendChild(h('h2',{style:'margin-bottom:4px'},'Zaznamenať mieru'));
+  sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Vyplň čo chceš sledovať. Prázdne polia sa preskočia.'));
+
+  const fields = [
+    [`Hmotnosť (${weightUnit()})`,'weightKg', PROFILE.weightKg?displayWeight(PROFILE.weightKg):''],
+    ['Telesný tuk (%)','bodyFatPct', PROFILE.bodyFatPct||''],
+    [`Pás (${lengthUnit()})`,'waistCm', ''],
+    [`Hrudník (${lengthUnit()})`,'chestCm', ''],
+    [`Biceps (${lengthUnit()})`,'bicepCm', ''],
+    [`Stehno (${lengthUnit()})`,'thighCm', ''],
+  ];
+  fields.forEach(([label,key,val])=>{
+    sheet.appendChild(h('label',{class:'input-label'},label));
+    const wrap = h('div',{class:'input-wrap'});
+    wrap.appendChild(h('input',{type:'number',inputmode:'decimal','data-bkey':key, value:val, id:`bl-${key}`}));
+    sheet.appendChild(wrap);
+  });
+
+  sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
+    const entry = { date: new Date().toISOString() };
+    let any = false;
+    const lengthKeys = ['waistCm','chestCm','bicepCm','thighCm'];
+    fields.forEach(([_,key])=>{
+      const raw = document.getElementById(`bl-${key}`)?.value;
+      if (raw && raw.trim()!=='') {
+        let v = parseFloat(raw);
+        if (key==='weightKg') v = inputToKg(raw);
+        else if (lengthKeys.includes(key) && PROFILE.units==='imperial') v = Math.round(v*2.54*10)/10;
+        entry[key] = v;
+        any = true;
+      }
+    });
+    if (!any) { alert('Vyplň aspoň jednu hodnotu.'); return; }
+    BODY_LOG.push(entry);
+    saveBodyLog();
+    // Aktualizuj aj aktuálnu váhu v profile
+    if (entry.weightKg) saveProfile({weightKg: entry.weightKg});
+    if (entry.bodyFatPct) saveProfile({bodyFatPct: entry.bodyFatPct});
+    closeModal();
+    render();
+  }},'Uložiť záznam'));
+
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+}
+
+// ── ŠTATISTIKY: TÝŽDEŇ ──
+function renderStatsWeek(wrap) {
+  // Tréningy za posledných 7 a predošlých 7 dní
+  const now = Date.now();
+  const day = 86400000;
+  const thisWeek = HISTORY.filter(e=> now - new Date(e.date).getTime() <= 7*day);
+  const lastWeek = HISTORY.filter(e=>{ const diff = now - new Date(e.date).getTime(); return diff > 7*day && diff <= 14*day; });
+
+  const sumWeek = (arr)=>arr.reduce((a,e)=>({
+    count: a.count+1,
+    volume: a.volume + (e.stats?.volume || 0),
+    sets: a.sets + (e.stats?.sets || 0),
+  }), {count:0, volume:0, sets:0});
+  const tw = sumWeek(thisWeek);
+  const lw = sumWeek(lastWeek);
+
+  wrap.appendChild(h('p',{class:'section-title'},'POSLEDNÝCH 7 DNÍ'));
+
+  // Karty
+  const grid = h('div',{style:'display:flex;gap:10px;margin-bottom:10px'});
+  [['Tréningy',tw.count,lw.count,''],['Série',tw.sets,lw.sets,''],['Objem',Math.round(displayWeight(tw.volume)),Math.round(displayWeight(lw.volume)),weightUnit()]].forEach(([label,val,prev,unit])=>{
+    const card = h('div',{class:'card',style:'flex:1;text-align:center;padding:14px 6px'});
+    card.appendChild(h('div',{style:'color:var(--txt);font-size:20px;font-weight:800'}, `${val}${unit?' '+unit:''}`));
+    card.appendChild(h('div',{style:'color:var(--txtDim);font-size:10px;margin-top:2px'},label));
+    if (prev>0) {
+      const diff = val - prev;
+      card.appendChild(h('div',{style:`color:${diff>=0?'var(--green)':'var(--txtFaint)'};font-size:10px;margin-top:3px`}, `${diff>=0?'+':''}${diff} vs min.`));
+    }
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+
+  if (!thisWeek.length) {
+    wrap.appendChild(h('div',{class:'card',style:'text-align:center;padding:20px;margin-top:6px'},[
+      h('div',{style:'font-size:28px;margin-bottom:6px'},'📅'),
+      h('div',{style:'color:var(--txtDim);font-size:13px'},'Tento týždeň ešte žiadny tréning. Šup do toho!'),
+    ]));
+  }
+
+  // Tréningové dni v týždni (kalendárik)
+  wrap.appendChild(h('p',{class:'section-title'},'POSLEDNÝCH 14 DNÍ'));
+  const calCard = h('div',{class:'card'});
+  const calRow = h('div',{style:'display:flex;gap:4px;justify-content:space-between;flex-wrap:wrap'});
+  const trainedDays = new Set(HISTORY.map(e=>e.date.split('T')[0]));
+  const dayNames=['Ne','Po','Ut','St','Št','Pi','So'];
+  for (let i=13;i>=0;i--){
+    const d = new Date(now - i*day);
+    const key = d.toISOString().split('T')[0];
+    const trained = trainedDays.has(key);
+    const cell = h('div',{style:'display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:38px'});
+    cell.appendChild(h('div',{style:'color:var(--txtFaint);font-size:9px'}, dayNames[d.getDay()]));
+    cell.appendChild(h('div',{style:`width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;background:${trained?'var(--pri)':'var(--surf3)'};color:${trained?'#fff':'var(--txtFaint)'}`}, trained?'✓':String(d.getDate())));
+    calRow.appendChild(cell);
+  }
+  calCard.appendChild(calRow);
+  wrap.appendChild(calCard);
+
+  // Streak
+  const streak = computeStreak();
+  wrap.appendChild(h('p',{class:'section-title'},'SÉRIA'));
+  const streakCard = h('div',{class:'card',style:'display:flex;align-items:center;justify-content:space-between'});
+  streakCard.appendChild(h('div',{},[
+    h('div',{style:'color:var(--txt);font-size:20px;font-weight:800'},`${streak} ${streak===1?'deň':'dní'}`),
+    h('div',{style:'color:var(--txtDim);font-size:12px;margin-top:2px'},'za sebou'),
+  ]));
+  streakCard.appendChild(h('span',{style:'font-size:28px'},'🔥'));
+  wrap.appendChild(streakCard);
 }
 
 
@@ -2408,9 +2627,27 @@ function settingsModal(title, contentBuilder) {
   sheet.appendChild(h('div',{class:'modal-handle'}));
   sheet.appendChild(h('h2',{style:'margin-bottom:16px'},title));
   contentBuilder(sheet);
-  sheet.appendChild(h('button',{class:'btn btn-primary',style:'margin-top:8px', onClick:()=>{ closeModal(); render(); }},'Hotovo'));
+  sheet.appendChild(h('button',{class:'btn btn-primary',style:'margin-top:8px', onClick:()=>{
+    closeModal();
+    showToast('✓ Uložené');
+    render();
+  }},'Hotovo'));
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
+}
+
+function showToast(msg, duration=2000) {
+  const existing = document.getElementById('toast-msg');
+  if (existing) existing.remove();
+  const toast = h('div',{id:'toast-msg', style:`
+    position:fixed;bottom:calc(var(--safeB) + 80px);left:50%;transform:translateX(-50%);
+    background:#22C55E;color:#fff;font-size:14px;font-weight:700;
+    padding:10px 20px;border-radius:12px;z-index:400;
+    box-shadow:0 4px 16px #0004;pointer-events:none;
+    animation:fadeInUp .2s ease;
+  `}, msg);
+  document.body.appendChild(toast);
+  setTimeout(()=>toast.remove(), duration);
 }
 
 function openPersonalDataModal() {
@@ -2424,38 +2661,43 @@ function openPersonalDataModal() {
     fields.forEach(([label,key,type,val])=>{
       sheet.appendChild(h('label',{class:'input-label'},label));
       const wrap = h('div',{class:'input-wrap'});
-      const inp = h('input',{type,value:val,'data-key':key, inputmode: type==='number'?'decimal':'text'});
+      const inp = h('input',{type, value:val, 'data-key':key, inputmode: type==='number'?'decimal':'text'});
+      // Ukladaj pri každom blur (iPhone nevyvolá change bez blur)
+      inp.addEventListener('blur',(e)=>{
+        const k=e.target.getAttribute('data-key');
+        let v=e.target.value;
+        if (!v.trim()) return;
+        if (k==='heightCm') v = PROFILE.units==='imperial' ? Math.round(parseFloat(v)*2.54*10)/10 : parseFloat(v);
+        else if (k==='weightKg') v = inputToKg(v);
+        else if (k==='age') v = parseInt(v,10);
+        saveProfile({[k]: v||null});
+      });
       wrap.appendChild(inp);
       sheet.appendChild(wrap);
     });
-    // Cieľ
+
+    // Cieľ – aktualizuj segment bez close/reopen
     sheet.appendChild(h('label',{class:'input-label'},'Cieľ'));
-    const goalSeg = h('div',{class:'segment',style:'margin-bottom:14px;flex-wrap:wrap'});
+    const goalSeg = h('div',{class:'segment',style:'margin-bottom:14px;flex-wrap:wrap', id:'goal-seg'});
     Object.entries(GOAL_LABELS).forEach(([k,v])=>{
-      const b = h('button',{class:'segment-btn'+(PROFILE.goal===k?' active':''),style:'flex:1 1 45%', onClick:()=>{ saveProfile({goal:k}); closeModal(); openPersonalDataModal(); }}, v.split(' ')[0]);
+      const b = h('button',{class:'segment-btn'+(PROFILE.goal===k?' active':''),style:'flex:1 1 45%',
+        onClick:()=>{
+          saveProfile({goal:k});
+          goalSeg.querySelectorAll('.segment-btn').forEach(x=>x.classList.remove('active'));
+          b.classList.add('active');
+        }}, v.split(' ')[0]);
       goalSeg.appendChild(b);
     });
     sheet.appendChild(goalSeg);
+
     // Aktivita
     sheet.appendChild(h('label',{class:'input-label'},'Úroveň aktivity'));
-    const actSel = h('select',{class:'chart-select',style:'width:100%;background:var(--surf2);border:1px solid var(--border2);color:var(--txt);border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px'});
+    const actSel = h('select',{style:'width:100%;background:var(--surf2);border:1px solid var(--border2);color:var(--txt);border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px'});
     Object.entries(ACTIVITY_LABELS).forEach(([k,v])=>{
       const opt=h('option',{value:k},v); if(PROFILE.activityLevel===k) opt.selected=true; actSel.appendChild(opt);
     });
     actSel.addEventListener('change',(e)=>saveProfile({activityLevel:e.target.value}));
     sheet.appendChild(actSel);
-
-    // Pri zatvorení ulož textové polia (override Hotovo tlačidla cez listener na inputy)
-    sheet.querySelectorAll('input[data-key]').forEach(inp=>{
-      inp.addEventListener('change',(e)=>{
-        const key=e.target.getAttribute('data-key');
-        let v=e.target.value;
-        if (key==='heightCm') { v = PROFILE.units==='imperial' ? Math.round(parseFloat(v)*2.54*10)/10 : parseFloat(v); }
-        else if (key==='weightKg') { v = inputToKg(v); }
-        else if (key==='age') { v = parseInt(v,10); }
-        saveProfile({[key]: v||null});
-      });
-    });
   });
 }
 
@@ -2464,34 +2706,63 @@ function openUnitsModal() {
     sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Vyber systém jednotiek. Hodnoty sa automaticky prepočítajú.'));
     const seg = h('div',{class:'segment'});
     [['metric','Metrické (kg / cm)'],['imperial','Imperiálne (lbs / in)']].forEach(([k,label])=>{
-      seg.appendChild(h('button',{class:'segment-btn'+(PROFILE.units===k?' active':''), onClick:()=>{ saveProfile({units:k}); closeModal(); openUnitsModal(); }}, label));
+      const b = h('button',{class:'segment-btn'+(PROFILE.units===k?' active':''),
+        onClick:()=>{
+          saveProfile({units:k});
+          seg.querySelectorAll('.segment-btn').forEach(x=>x.classList.remove('active'));
+          b.classList.add('active');
+        }}, label);
+      seg.appendChild(b);
     });
     sheet.appendChild(seg);
   });
 }
 
+// Pomocná funkcia pre toggle – aktualizuje DOM priamo bez close/reopen (iOS Safari fix)
+function toggleSetting(key, tgEl, labelEl) {
+  const newVal = !PROFILE[key];
+  saveProfile({[key]: newVal});
+  if (tgEl) {
+    tgEl.className = 'toggle' + (newVal ? ' on' : '');
+  }
+  if (labelEl) labelEl.textContent = newVal ? 'Zapnuté' : 'Vypnuté';
+}
+
+function makeToggle(profileKey, extraOnToggle) {
+  const tg = h('button',{class:'toggle'+(PROFILE[profileKey]?' on':'')});
+  tg.appendChild(h('div',{class:'toggle-knob'}));
+  tg.addEventListener('click',()=>{
+    toggleSetting(profileKey, tg);
+    if (extraOnToggle) extraOnToggle(PROFILE[profileKey]);
+  });
+  return tg;
+}
+
 function openTimerModal() {
   settingsModal('Časovač prestávky', (sheet)=>{
     sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Dĺžka prestávky medzi sériami.'));
-    // Rýchle voľby
     const quick = h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px'});
     [30,60,90,120,150,180].forEach(sec=>{
-      const active = PROFILE.restSeconds===sec;
-      quick.appendChild(h('button',{class:'btn btn-sm '+(active?'btn-primary':'btn-outline'),style:'flex:1 1 28%', onClick:()=>{ saveProfile({restSeconds:sec}); closeModal(); openTimerModal(); }}, fmtTime(sec)));
+      const btn = h('button',{class:'btn btn-sm '+(PROFILE.restSeconds===sec?'btn-primary':'btn-outline'),style:'flex:1 1 28%',
+        onClick:()=>{
+          saveProfile({restSeconds:sec});
+          sheet.querySelectorAll('.rest-quick-btn').forEach(b=>b.className='btn btn-sm btn-outline');
+          btn.className='btn btn-sm btn-primary';
+        }});
+      btn.className += ' rest-quick-btn';
+      btn.textContent = fmtTime(sec);
+      quick.appendChild(btn);
     });
     sheet.appendChild(quick);
-    // Vlastný čas
     sheet.appendChild(h('label',{class:'input-label'},'Vlastný čas (sekundy)'));
     const wrap = h('div',{class:'input-wrap'});
-    const inp = h('input',{type:'number',inputmode:'numeric',value:PROFILE.restSeconds||90, onChange:(e)=>{ const v=parseInt(e.target.value,10); if(v>0) saveProfile({restSeconds:v}); }});
+    const inp = h('input',{type:'number',inputmode:'numeric',value:PROFILE.restSeconds||90});
+    inp.addEventListener('change',(e)=>{ const v=parseInt(e.target.value,10); if(v>0) saveProfile({restSeconds:v}); });
     wrap.appendChild(inp); wrap.appendChild(h('span',{class:'unit'},'s'));
     sheet.appendChild(wrap);
-    // Auto-start toggle
     const toggleRow = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
     toggleRow.appendChild(h('span',{class:'setting-label'},'Automaticky spustiť po sérii'));
-    const tg = h('button',{class:'toggle'+(PROFILE.restAutoStart?' on':''), onClick:()=>{ saveProfile({restAutoStart:!PROFILE.restAutoStart}); closeModal(); openTimerModal(); }});
-    tg.appendChild(h('div',{class:'toggle-knob'}));
-    toggleRow.appendChild(tg);
+    toggleRow.appendChild(makeToggle('restAutoStart'));
     sheet.appendChild(toggleRow);
   });
 }
@@ -2501,41 +2772,46 @@ function openProgressionModal() {
     sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Kedy ti appka navrhne pridať váhu?'));
     const rules = [['all_sets','Po dosiahnutí horného rozsahu na všetkých sériách'],['any_set','Po dosiahnutí horného rozsahu aspoň raz'],['aggressive','Skúsiť pridať každý tréning'],['off','Vypnuté (žiadne návrhy)']];
     rules.forEach(([k,label])=>{
-      const row = h('div',{class:'select-card'+(PROFILE.progRule===k?' selected':''), onClick:()=>{ saveProfile({progRule:k}); closeModal(); openProgressionModal(); }});
+      const row = h('div',{class:'select-card'+(PROFILE.progRule===k?' selected':''),
+        onClick:()=>{
+          saveProfile({progRule:k});
+          sheet.querySelectorAll('.select-card').forEach(c=>c.className='select-card');
+          row.className='select-card selected';
+          row.querySelector('.check-dot')?.remove() || row.appendChild(h('div',{class:'check-dot'},'✓'));
+        }});
       row.appendChild(h('div',{class:'label'},[h('div',{class:'label-main',style:'font-size:13px'},label)]));
       if (PROFILE.progRule===k) row.appendChild(h('div',{class:'check-dot'},'✓'));
       sheet.appendChild(row);
     });
-    // Krok váhy
     sheet.appendChild(h('label',{class:'input-label',style:'margin-top:8px'},`Prírastok – vrch tela (${weightUnit()})`));
     const w1=h('div',{class:'input-wrap'});
-    w1.appendChild(h('input',{type:'number',inputmode:'decimal',value:displayWeight(PROFILE.progStepUpper||2.5),onChange:(e)=>saveProfile({progStepUpper:inputToKg(e.target.value)})}));
-    sheet.appendChild(w1);
+    const i1=h('input',{type:'number',inputmode:'decimal',value:displayWeight(PROFILE.progStepUpper||2.5)});
+    i1.addEventListener('change',(e)=>saveProfile({progStepUpper:inputToKg(e.target.value)}));
+    w1.appendChild(i1); sheet.appendChild(w1);
     sheet.appendChild(h('label',{class:'input-label'},`Prírastok – nohy (${weightUnit()})`));
     const w2=h('div',{class:'input-wrap'});
-    w2.appendChild(h('input',{type:'number',inputmode:'decimal',value:displayWeight(PROFILE.progStepLower||5),onChange:(e)=>saveProfile({progStepLower:inputToKg(e.target.value)})}));
-    sheet.appendChild(w2);
+    const i2=h('input',{type:'number',inputmode:'decimal',value:displayWeight(PROFILE.progStepLower||5)});
+    i2.addEventListener('change',(e)=>saveProfile({progStepLower:inputToKg(e.target.value)}));
+    w2.appendChild(i2); sheet.appendChild(w2);
   });
 }
 
 function openAdvancedModal() {
   settingsModal('Pokročilé nastavenia', (sheet)=>{
     sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Pre skúsenejších cvičencov.'));
-    // RIR toggle
     const row = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
     const lbl = h('div',{style:'flex:1'});
     lbl.appendChild(h('div',{class:'setting-label'},'Zobrazovať RIR'));
-    lbl.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:3px;line-height:1.4'},'RIR (Reps In Reserve) = koľko opakovaní by si ešte zvládol. Napr. RIR 2 znamená, že si mohol spraviť ešte 2 opakovania. Pomáha riadiť intenzitu.'));
+    lbl.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:3px;line-height:1.4'},'RIR (Reps In Reserve) = koľko opakovaní by si ešte zvládol. Napr. RIR 2 znamená, že si mohol spraviť ešte 2 opakovania.'));
     row.appendChild(lbl);
-    const tg = h('button',{class:'toggle'+(PROFILE.showRIR?' on':''), onClick:()=>{ saveProfile({showRIR:!PROFILE.showRIR}); closeModal(); openAdvancedModal(); }});
-    tg.appendChild(h('div',{class:'toggle-knob'}));
-    row.appendChild(tg);
+    row.appendChild(makeToggle('showRIR'));
     sheet.appendChild(row);
   });
 }
 
 function openNotifModal() {
-  settingsModal('Notifikácie', (sheet)=>{    const supported = ('Notification' in window);
+  settingsModal('Notifikácie', (sheet)=>{
+    const supported = ('Notification' in window);
     if (!supported) {
       sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px'},'Tvoj prehliadač nepodporuje notifikácie. Na iPhone pridaj appku na plochu, aby fungovali.'));
       return;
@@ -2547,10 +2823,12 @@ function openNotifModal() {
     } else {
       const toggleRow = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
       toggleRow.appendChild(h('span',{class:'setting-label'},'Upozornenie po prestávke'));
-      const tg = h('button',{class:'toggle'+(PROFILE.notifRest?' on':''), onClick:()=>{ saveProfile({notifRest:!PROFILE.notifRest}); closeModal(); openNotifModal(); }});
-      tg.appendChild(h('div',{class:'toggle-knob'}));
-      toggleRow.appendChild(tg);
+      toggleRow.appendChild(makeToggle('notifRest'));
       sheet.appendChild(toggleRow);
+      const toggleRow2 = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
+      toggleRow2.appendChild(h('span',{class:'setting-label'},'Denná pripomienka tréningu'));
+      toggleRow2.appendChild(makeToggle('notifDaily'));
+      sheet.appendChild(toggleRow2);
     }
   });
 }
@@ -2606,6 +2884,120 @@ let splitDraft = null;        // vygenerovaný návrh splitu čakajúci na potvr
 function backToTraining() {
   activeTab = 'training';
   navigate('home');
+}
+
+// ═══════════════════════════ WORKOUT MÓD ═══════════════════════════════
+let workoutModeDayId = null;
+let workoutModeExIdx = 0;
+
+function renderWorkoutMode() {
+  const days = getActiveDays();
+  const day = days.find(d=>d.id===workoutModeDayId);
+  const screen = h('div',{class:'screen'});
+
+  if (!day || !day.exercises.length) {
+    activeTab='training'; navigate('home'); return screen;
+  }
+
+  if (workoutModeExIdx >= day.exercises.length) workoutModeExIdx = day.exercises.length-1;
+  if (workoutModeExIdx < 0) workoutModeExIdx = 0;
+  const ex = day.exercises[workoutModeExIdx];
+  const sess = (SESSION[day.id]||{})[ex.id] || {};
+
+  const top = h('div',{style:'padding:calc(var(--safeT) + 14px) var(--pad) 14px;background:var(--surf);border-bottom:1px solid var(--border);flex-shrink:0'});
+  const topRow = h('div',{style:'display:flex;align-items:center;justify-content:space-between'});
+  topRow.appendChild(h('button',{class:'icon-btn', onClick:()=>{ stopRestTimer(); activeTab='training'; navigate('home'); }},'✕'));
+  topRow.appendChild(h('div',{style:'color:var(--txt);font-weight:800;font-size:15px'}, day.title));
+  const dots = h('div',{style:'display:flex;gap:4px'});
+  day.exercises.forEach((e,i)=>{
+    const dn = isExDone(day.id,e);
+    dots.appendChild(h('div',{style:`width:7px;height:7px;border-radius:50%;background:${i===workoutModeExIdx?'var(--pri)':(dn?'var(--green)':'var(--surf3)')}`}));
+  });
+  topRow.appendChild(dots);
+  top.appendChild(topRow);
+  screen.appendChild(top);
+
+  const scroll = h('div',{class:'scroll',style:'display:flex;flex-direction:column'});
+
+  scroll.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px;font-weight:600;margin-bottom:4px'}, `Cvik ${workoutModeExIdx+1} z ${day.exercises.length}`));
+  scroll.appendChild(h('div',{style:'color:var(--pri);font-size:24px;font-weight:800;line-height:1.1;margin-bottom:6px'}, ex.name));
+  scroll.appendChild(h('div',{style:'color:var(--txtDim);font-size:13px;margin-bottom:2px'}, `Cieľ: ${ex.sets} série × ${ex.reps} opakovaní · ${MUSCLE_LABELS[ex.muscle]||''}`));
+  scroll.appendChild(h('div',{class:'ex-note',style:'padding:10px 0 16px 0'}, ex.note));
+
+  const suggestion = suggestProgression(ex);
+  if (suggestion) {
+    scroll.appendChild(h('div',{class:'prog-hint',style:'margin-bottom:14px'}, '📈 ' + suggestion.reason));
+  }
+
+  const targetReps = parseBottomReps(ex.reps) || 8;
+  const suggestedWeight = suggestion ? suggestion.weight : null;
+  const suggestedReps = suggestion ? suggestion.reps : targetReps;
+
+  for (let si=0; si<ex.sets; si++) {
+    const s = (sess.sets||[])[si] || {};
+    const isDone = !!s.done;
+    const wVal = s.weight!=null && s.weight!=='' ? displayWeight(parseFloat(s.weight)) : (suggestedWeight!=null ? displayWeight(suggestedWeight) : '');
+    const rVal = s.reps!=null && s.reps!=='' ? s.reps : suggestedReps;
+
+    const block = h('div',{class:'set-block'+(isDone?' done':'')});
+    const topB = h('div',{class:'set-block-top'});
+    topB.appendChild(h('div',{class:'set-block-label'}, `Séria ${si+1}`));
+    block.appendChild(topB);
+    const fields = h('div',{class:'set-fields'});
+
+    const wStep = progStepForMuscle(ex.muscle);
+    const wStepper = h('div',{class:'stepper'});
+    wStepper.appendChild(h('div',{class:'stepper-label'}, `Váha (${weightUnit()})`));
+    const wRow = h('div',{class:'stepper-row'});
+    wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',-wStep)},'−'));
+    wRow.appendChild(h('input',{class:'stepper-val',type:'number',inputmode:'decimal',value:wVal,placeholder:'0',id:`w-${ex.id}-${si}`,
+      onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight', inputToKg(e.target.value)); }}));
+    wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',wStep)},'+'));
+    wStepper.appendChild(wRow);
+    fields.appendChild(wStepper);
+
+    const rStepper = h('div',{class:'stepper'});
+    rStepper.appendChild(h('div',{class:'stepper-label'}, 'Opakovania'));
+    const rRow = h('div',{class:'stepper-row'});
+    rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',-1)},'−'));
+    rRow.appendChild(h('input',{class:'stepper-val',type:'number',inputmode:'numeric',value:rVal,placeholder:'0',id:`r-${ex.id}-${si}`,
+      onChange:(e)=>{ setSetVal(day.id,ex.id,si,'reps', e.target.value); }}));
+    rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',1)},'+'));
+    rStepper.appendChild(rRow);
+    fields.appendChild(rStepper);
+
+    const checkBtn = h('button',{class:'set-check-lg'+(isDone?' done':''), onClick:()=>{
+      const curW = document.getElementById(`w-${ex.id}-${si}`)?.value || wVal;
+      const curR = document.getElementById(`r-${ex.id}-${si}`)?.value || rVal;
+      completeSet(day.id, ex.id, si, curW, curR);
+    }},'✓');
+    fields.appendChild(checkBtn);
+    block.appendChild(fields);
+    scroll.appendChild(block);
+  }
+
+  screen.appendChild(scroll);
+
+  const bottom = h('div',{style:'padding:12px var(--pad) calc(var(--safeB) + 12px);background:var(--surf);border-top:1px solid var(--border);display:flex;gap:10px;flex-shrink:0'});
+  const prevBtn = h('button',{class:'btn btn-outline',style:'flex:1', onClick:()=>{
+    if (workoutModeExIdx>0) { workoutModeExIdx--; stopRestTimer(); render(); }
+  }},'← Predošlý');
+  if (workoutModeExIdx===0) prevBtn.disabled = true;
+  bottom.appendChild(prevBtn);
+
+  const isLast = workoutModeExIdx === day.exercises.length-1;
+  if (isLast) {
+    bottom.appendChild(h('button',{class:'btn btn-primary',style:'flex:1;background:var(--green)', onClick:()=>{
+      stopRestTimer(); finishWorkout(day);
+    }},'✓ Ukončiť'));
+  } else {
+    bottom.appendChild(h('button',{class:'btn btn-primary',style:'flex:1', onClick:()=>{
+      workoutModeExIdx++; stopRestTimer(); render();
+    }},'Ďalší cvik →'));
+  }
+  screen.appendChild(bottom);
+
+  return screen;
 }
 
 function renderSplitManage() {
