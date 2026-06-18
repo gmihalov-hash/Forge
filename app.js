@@ -117,6 +117,99 @@ function calcWarmupSets(workingWeight){
   ];
 }
 
+// ───────────────────────── JEDNOTKY (kg/lbs, cm/inch) ──────────────────
+function kgToLbs(kg){ return Math.round(kg*2.20462*10)/10; }
+function lbsToKg(lbs){ return Math.round(lbs/2.20462*10)/10; }
+function cmToInch(cm){ return Math.round(cm/2.54*10)/10; }
+// Zobrazí hmotnosť v jednotkách užívateľa (interne vždy ukladáme kg)
+function displayWeight(kg){
+  if (kg==null || kg==='') return '';
+  return (PROFILE.units==='imperial') ? kgToLbs(kg) : kg;
+}
+function weightUnit(){ return PROFILE.units==='imperial' ? 'lbs' : 'kg'; }
+function lengthUnit(){ return PROFILE.units==='imperial' ? 'in' : 'cm'; }
+// Konvertuje zadanú hodnotu (v jednotkách užívateľa) späť na kg pre uloženie
+function inputToKg(val){
+  const n = parseFloat(val);
+  if (isNaN(n)) return null;
+  return (PROFILE.units==='imperial') ? lbsToKg(n) : n;
+}
+
+// ───────────────────────── PROGRESÍVNE PREŤAŽENIE ──────────────────────
+// Zistí, či je cvik pre "vrch tela" (menší krok) alebo "nohy" (väčší krok)
+const LOWER_MUSCLES = ['quads','hamstrings','glutes','calves'];
+function progStepForMuscle(muscle){
+  return LOWER_MUSCLES.includes(muscle) ? (PROFILE.progStepLower||5) : (PROFILE.progStepUpper||2.5);
+}
+// Parsuje horný cieľ z reps stringu ("6–8" -> 8, "12" -> 12, "30–60s" -> null)
+function parseTopReps(reps){
+  if (!reps) return null;
+  const m = String(reps).match(/(\d+)\s*[–-]\s*(\d+)/);
+  if (m) return parseInt(m[2],10);
+  const single = String(reps).match(/^(\d+)$/);
+  if (single) return parseInt(single[1],10);
+  return null;
+}
+function parseBottomReps(reps){
+  if (!reps) return null;
+  const m = String(reps).match(/(\d+)\s*[–-]\s*(\d+)/);
+  if (m) return parseInt(m[1],10);
+  const single = String(reps).match(/^(\d+)$/);
+  if (single) return parseInt(single[1],10);
+  return null;
+}
+// Vráti najlepší (najťažší) posledný výkon cviku z histórie
+function getLastWorkoutForExercise(exId){
+  for (let i=HISTORY.length-1;i>=0;i--){
+    if (HISTORY[i].data[exId]){
+      const sets = (HISTORY[i].data[exId].sets||[]).filter(s=>s.done && s.weight);
+      if (sets.length) return sets;
+    }
+  }
+  return null;
+}
+// Navrhne progres na základe posledného výkonu + nastavení užívateľa
+// Vráti { weight, reps, reason } alebo null
+function suggestProgression(ex){
+  if (PROFILE.progRule==='off') return null;
+  const lastSets = getLastWorkoutForExercise(ex.id);
+  if (!lastSets) return null;
+
+  const topRep = parseTopReps(ex.reps);
+  const bottomRep = parseBottomReps(ex.reps);
+  const lastWeight = Math.max(...lastSets.map(s=>parseFloat(s.weight)));
+  const setsAtTopWeight = lastSets.filter(s=>parseFloat(s.weight)===lastWeight);
+  const step = progStepForMuscle(ex.muscle);
+
+  // Koľko sérií dosiahlo horný rozsah opakovaní
+  const repsHitTop = setsAtTopWeight.filter(s=>topRep && parseInt(s.reps,10)>=topRep);
+
+  let shouldAddWeight = false;
+  if (PROFILE.progRule==='aggressive') {
+    shouldAddWeight = true;
+  } else if (PROFILE.progRule==='any_set') {
+    shouldAddWeight = repsHitTop.length >= 1;
+  } else { // 'all_sets' (default)
+    shouldAddWeight = topRep && repsHitTop.length >= setsAtTopWeight.length && setsAtTopWeight.length>0;
+  }
+
+  if (shouldAddWeight && topRep) {
+    return {
+      weight: lastWeight + step,
+      reps: bottomRep || topRep,
+      reason: `Minule ${lastSets.map(s=>s.reps).join(',')} → pridaj ${step}${weightUnit()}`,
+    };
+  } else {
+    // Zopakuj váhu, cieľ pridať opakovania
+    const maxReps = Math.max(...setsAtTopWeight.map(s=>parseInt(s.reps,10)||0));
+    return {
+      weight: lastWeight,
+      reps: topRep ? Math.min(maxReps+1, topRep) : maxReps,
+      reason: `Minule ${lastSets.map(s=>s.reps).join(',')} → skús pridať opakovania`,
+    };
+  }
+}
+
 // ───────────────────────── STORAGE ─────────────────────────────────────
 const DB = {
   key:k=>`forgex_${k}`,
@@ -129,6 +222,19 @@ const DEFAULT_PROFILE = {
   bodyFatPct:null, waistCm:null, neckCm:null, hipCm:null,
   chestCm:null, shoulderCm:null, thighCm:null, calfCm:null, bicepCm:null,
   goal:null, activityLevel:null, theme:'auto',
+  // ── Nastavenia (Dávka 3) ──
+  units:'metric',            // 'metric' (kg/cm) | 'imperial' (lbs/inch)
+  lang:'sk',                 // 'sk' | 'cz' | 'en' (zatiaľ len SK aktívne)
+  notifRest:true,            // notifikácia po prestávke
+  notifDaily:false,          // denná pripomienka tréningu
+  promoCode:null,            // zadaný promo kód
+  // ── Časovač (Dávka 1) ──
+  restSeconds:90,            // default dĺžka prestávky medzi sériami
+  restAutoStart:true,        // auto spustenie po odkliknutí série
+  // ── Progresívne preťaženie (Dávka 1) ──
+  progStepUpper:2.5,         // krok váhy pre vrch tela (kg)
+  progStepLower:5,           // krok váhy pre nohy (kg)
+  progRule:'all_sets',       // 'all_sets' | 'any_set' | 'aggressive' | 'off'
 };
 let PROFILE = { ...DEFAULT_PROFILE, ...(DB.get('profile')||{}) };
 function saveProfile(patch){ PROFILE = { ...PROFILE, ...patch }; DB.set('profile', PROFILE); }
@@ -319,14 +425,73 @@ function exByMuscle(muscle, excludeIds=[]) {
   return EXERCISE_LIBRARY.filter(e=>e.muscle===muscle && !excludeIds.includes(e.id));
 }
 
-function pickExercises(muscles, countPerMuscle=2) {
+// Pre ženy zvýši opakovania (dôraz na vyšší rozsah 12-15) a default váhy budú nižšie
+function adjustRepsForGender(reps, gender){
+  if (gender!=='female') return reps;
+  // Posun silových rozsahov (6-8, 8-10) smerom k 10-15 pre ženy
+  const map = {
+    '6–8':'10–12', '8–10':'12–15', '10–12':'12–15',
+  };
+  return map[reps] || reps;
+}
+
+function pickExercises(muscles, countPerMuscle=2, gender=null) {
   const picked = [];
   muscles.forEach(m=>{
     const opts = exByMuscle(m);
-    opts.slice(0, countPerMuscle).forEach(ex=>picked.push({...ex}));
+    opts.slice(0, countPerMuscle).forEach(ex=>picked.push({
+      ...ex,
+      reps: adjustRepsForGender(ex.reps, gender),
+    }));
   });
   return picked;
 }
+
+// Ženské varianty splitov – väčší dôraz na glutes, nohy, core
+const SPLIT_TEMPLATES_FEMALE = {
+  1: { name:'Fullbody (1×/týždeň)', days:[
+    { label:'D1', title:'FULLBODY', subtitle:'Celé telo · dôraz nohy/sedacie', muscles:['glutes','quads','back','hamstrings','core'] },
+  ]},
+  2: { name:'Upper / Lower', days:[
+    { label:'D1', title:'UPPER', subtitle:'Vrch tela', muscles:['back','chest','shoulders','triceps'] },
+    { label:'D2', title:'LOWER', subtitle:'Sedacie · Nohy · Core', muscles:['glutes','quads','hamstrings','calves','core'] },
+  ]},
+  3: { name:'Glutes / Upper / Lower', days:[
+    { label:'D1', title:'GLUTES', subtitle:'Sedacie svaly · Hamstringy', muscles:['glutes','hamstrings','calves'] },
+    { label:'D2', title:'UPPER', subtitle:'Chrbát · Ramená · Ruky', muscles:['back','shoulders','biceps','triceps'] },
+    { label:'D3', title:'LOWER', subtitle:'Kvadricepsy · Sedacie · Core', muscles:['quads','glutes','core'] },
+  ]},
+  4: { name:'Glutes+Lower / Upper ×2', days:[
+    { label:'D1', title:'GLUTES A', subtitle:'Sedacie · Hamstringy', muscles:['glutes','hamstrings','calves'] },
+    { label:'D2', title:'UPPER A', subtitle:'Chrbát · Ramená', muscles:['back','shoulders','core'] },
+    { label:'D3', title:'LOWER B', subtitle:'Kvadricepsy · Sedacie', muscles:['quads','glutes'] },
+    { label:'D4', title:'UPPER B', subtitle:'Hrudník · Ruky', muscles:['chest','biceps','triceps'] },
+  ]},
+  5: { name:'Glutes / Upper / Lower / Glutes / Core', days:[
+    { label:'D1', title:'GLUTES', subtitle:'Sedacie · Hamstringy', muscles:['glutes','hamstrings'] },
+    { label:'D2', title:'UPPER', subtitle:'Chrbát · Ramená · Ruky', muscles:['back','shoulders','triceps'] },
+    { label:'D3', title:'LOWER', subtitle:'Kvadricepsy · Lýtka', muscles:['quads','calves'] },
+    { label:'D4', title:'GLUTES B', subtitle:'Sedacie · dôraz objem', muscles:['glutes','hamstrings'] },
+    { label:'D5', title:'UPPER+CORE', subtitle:'Hrudník · Core', muscles:['chest','biceps','core'] },
+  ]},
+  6: { name:'Glutes / Upper / Lower ×2', days:[
+    { label:'D1', title:'GLUTES A', subtitle:'Sedacie · Hamstringy', muscles:['glutes','hamstrings'] },
+    { label:'D2', title:'UPPER A', subtitle:'Chrbát · Ramená', muscles:['back','shoulders'] },
+    { label:'D3', title:'LOWER A', subtitle:'Kvadricepsy · Core', muscles:['quads','core'] },
+    { label:'D4', title:'GLUTES B', subtitle:'Sedacie · objem', muscles:['glutes','hamstrings'] },
+    { label:'D5', title:'UPPER B', subtitle:'Hrudník · Ruky', muscles:['chest','biceps','triceps'] },
+    { label:'D6', title:'LOWER B', subtitle:'Nohy · Lýtka', muscles:['quads','calves'] },
+  ]},
+  7: { name:'Glutes / Upper / Lower ×2 + Core', days:[
+    { label:'D1', title:'GLUTES A', subtitle:'Sedacie · Hamstringy', muscles:['glutes','hamstrings'] },
+    { label:'D2', title:'UPPER A', subtitle:'Chrbát · Ramená', muscles:['back','shoulders'] },
+    { label:'D3', title:'LOWER A', subtitle:'Kvadricepsy', muscles:['quads','calves'] },
+    { label:'D4', title:'GLUTES B', subtitle:'Sedacie · objem', muscles:['glutes','hamstrings'] },
+    { label:'D5', title:'UPPER B', subtitle:'Hrudník · Ruky', muscles:['chest','biceps','triceps'] },
+    { label:'D6', title:'LOWER B', subtitle:'Nohy · Lýtka', muscles:['quads','calves'] },
+    { label:'D7', title:'CORE', subtitle:'Brušné svaly · stabilizácia', muscles:['core'] },
+  ]},
+};
 
 const SPLIT_TEMPLATES = {
   1: { name:'Fullbody (1×/týždeň)', days:[
@@ -373,16 +538,26 @@ const SPLIT_TEMPLATES = {
   ]},
 };
 
-function generateSplitFromTemplate(daysPerWeek) {
-  const tpl = SPLIT_TEMPLATES[daysPerWeek] || SPLIT_TEMPLATES[3];
+function generateSplitFromTemplate(daysPerWeek, gender) {
+  const g = gender || PROFILE.gender;
+  const templateSet = (g==='female') ? SPLIT_TEMPLATES_FEMALE : SPLIT_TEMPLATES;
+  const tpl = templateSet[daysPerWeek] || templateSet[3];
   const days = tpl.days.map((d,i)=>({
-    id: 'd'+(i+1)+'_'+Date.now(),
+    id: 'd'+(i+1)+'_'+Date.now()+'_'+i,
     label: d.label,
     title: d.title,
     subtitle: d.subtitle,
-    exercises: pickExercises(d.muscles, 2).map(ex=>({ id:ex.id, name:ex.name, sets:ex.sets, reps:ex.reps, note:ex.note, muscle:ex.muscle })),
+    weekday: null, // priradenie dňa týždňa (bod 4) – null = nepriradené
+    exercises: pickExercises(d.muscles, 2, g).map(ex=>({ id:ex.id, name:ex.name, sets:ex.sets, reps:ex.reps, note:ex.note, muscle:ex.muscle })),
   }));
-  return { id:'split_'+Date.now(), name: tpl.name, daysPerWeek, days };
+  return { id:'split_'+Date.now(), name: tpl.name, daysPerWeek, gender:g, days };
+}
+
+// Pomocná funkcia: získa template podľa pohlavia (pre náhľad v split_new)
+function getTemplate(daysPerWeek, gender){
+  const g = gender || PROFILE.gender;
+  const templateSet = (g==='female') ? SPLIT_TEMPLATES_FEMALE : SPLIT_TEMPLATES;
+  return templateSet[daysPerWeek] || templateSet[3];
 }
 
 
@@ -405,7 +580,6 @@ function h(tag, attrs={}, children=[]) {
 }
 
 function vibrate(ms=10){ if(navigator.vibrate) navigator.vibrate(ms); }
-
 function el(html) {
   const t = document.createElement('template');
   t.innerHTML = html.trim();
@@ -445,10 +619,16 @@ function render() {
     home: renderMainApp,
     split_manage: renderSplitManage,
     split_new: renderSplitNew,
+    split_preview: renderSplitPreview,
     split_edit_day: renderSplitEditDay,
   };
   const fn = routes[currentRoute] || renderMainApp;
   root.appendChild(fn());
+
+  // Ak beží časovač prestávky, znovu ho zobraz (re-render zmazal #root, nie body)
+  if (restTimerInterval && restTimerRemaining>0 && !document.getElementById('rest-timer')) {
+    renderRestTimer();
+  }
 }
 
 
@@ -471,8 +651,8 @@ function renderWelcome() {
   center.appendChild(h('p', {class:'subtitle'}, 'Vykovaj svoju najlepšiu verziu'));
 
   const bottom = h('div', {style:'padding-bottom:10px'});
-  bottom.appendChild(h('button', {class:'btn btn-primary', style:'margin-bottom:12px', onClick:()=>navigate('ob_gender')}, 'Začať zadarmo'));
-  bottom.appendChild(h('button', {class:'btn btn-ghost', onClick:()=>navigate('ob_gender')}, 'Už mám účet – Prihlásiť sa'));
+  bottom.appendChild(h('button', {class:'btn btn-primary', onClick:()=>navigate('ob_gender')}, 'Začať'));
+  bottom.appendChild(h('p', {style:'text-align:center;color:var(--txtFaint);font-size:12px;margin-top:14px'}, 'Tvoje dáta zostávajú v tvojom telefóne'));
 
   safe.appendChild(center);
   safe.appendChild(bottom);
@@ -720,7 +900,7 @@ function renderObResults() {
 function renderMainApp() {
   const screen = h('div', {class:'screen'});
 
-  const topbar = h('div', {id:'topbar', class:'safe-top'});
+  const topbar = h('div', {id:'topbar'});
   const topRow = h('div', {class:'topbar-row'});
   const titleWrap = h('div');
   titleWrap.appendChild(h('div', {class:'app-title'}, [h('span',{},'ForgeX')]));
@@ -729,7 +909,7 @@ function renderMainApp() {
   topRow.appendChild(titleWrap);
   topbar.appendChild(topRow);
 
-  const tabContent = h('div', {style:'flex:1;overflow-y:auto', id:'tab-content'});
+  const tabContent = h('div', {style:'flex:1;display:flex;flex-direction:column;min-height:0', id:'tab-content'});
   const tabRenderers = { home: renderTabHome, training: renderTabTraining, nutrition: renderTabNutrition, stats: renderTabStats, profile: renderTabProfile };
   tabContent.appendChild((tabRenderers[activeTab]||renderTabHome)());
 
@@ -785,10 +965,17 @@ function renderTabHome() {
   // Dnešný tréning
   wrap.appendChild(h('p',{class:'section-title'},'DNEŠNÝ TRÉNING'));
   const activeSplitDay = getTodaySplitDay();
+  const hasCustomWithWeekdays = ACTIVE_SPLIT_ID && getActiveDays().some(d=>d.weekday!=null);
   if (activeSplitDay) {
     const tCard = h('div',{class:'card card-accent', onClick:()=>{activeDayId=activeSplitDay.id; activeTab='training'; render();}});
     tCard.appendChild(h('p',{style:'color:var(--txt);font-weight:800;font-size:16px'},activeSplitDay.title));
     tCard.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:4px'},activeSplitDay.subtitle));
+    wrap.appendChild(tCard);
+  } else if (hasCustomWithWeekdays) {
+    // Dnes je oddychový deň (priradené dni týždňa, dnes nič)
+    const tCard = h('div',{class:'card'});
+    tCard.appendChild(h('p',{style:'color:var(--txt);font-weight:800;font-size:16px'},'Dnes je oddychový deň 😴'));
+    tCard.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:4px'},'Podľa tvojho rozvrhu dnes nemáš naplánovaný tréning. Regenerácia je súčasť progresu.'));
     wrap.appendChild(tCard);
   } else {
     const tCard = h('div',{class:'card card-accent'});
@@ -841,16 +1028,26 @@ function renderTabHome() {
 function getTodaySplitDay() {
   const activeDays = getActiveDays();
   if (!activeDays.length) return null;
-  // Preset PPL (bez vlastného splitu) zostáva fixovaný na dni týždňa
-  if (!ACTIVE_SPLIT_ID) {
-    const dow = new Date().getDay(); // 0=Ne,1=Po...
-    const map = {1:'po',2:'ut',3:'st',4:'stv',5:'pi'};
-    const id = map[dow];
-    return activeDays.find(d=>d.id===id) || null;
+  const dow = new Date().getDay(); // 0=Ne,1=Po...
+
+  // Ak je to vlastný split a má priradené dni týždňa, použijeme ich
+  if (ACTIVE_SPLIT_ID) {
+    const withWeekdays = activeDays.filter(d=>d.weekday!=null);
+    if (withWeekdays.length) {
+      const todayDay = withWeekdays.find(d=>d.weekday===dow);
+      if (todayDay) return todayDay;
+      // Dnes nie je tréningový deň podľa priradenia
+      return null;
+    }
+    // Vlastný split bez priradených dní: rotácia (prvý nedokončený)
+    const firstUnfinished = activeDays.find(d=>!d.exercises.every(ex=>isExDone(d.id,ex)));
+    return firstUnfinished || activeDays[0];
   }
-  // Vlastný split: nájdi prvý nedokončený deň (rotácia podľa poradia)
-  const firstUnfinished = activeDays.find(d=>!d.exercises.every(ex=>isExDone(d.id,ex)));
-  return firstUnfinished || activeDays[0];
+
+  // Preset PPL – fixný na dni týždňa
+  const map = {1:'po',2:'ut',3:'st',4:'stv',5:'pi'};
+  const id = map[dow];
+  return activeDays.find(d=>d.id===id) || null;
 }
 
 function computeStreak() {
@@ -871,7 +1068,7 @@ function computeStreak() {
 let trainingSubView = 'plan'; // plan | history
 
 function renderTabTraining() {
-  const wrap = h('div', {});
+  const wrap = h('div', {style:'flex:1;display:flex;flex-direction:column;min-height:0'});
   const activeDays = getActiveDays();
   if (!activeDays.find(d=>d.id===activeDayId)) activeDayId = activeDays[0]?.id;
 
@@ -980,6 +1177,11 @@ function renderDayPlan(activeDays) {
     container.appendChild(banner);
   }
 
+  // Manuálne tlačidlo časovača prestávky
+  const timerBtn = h('button',{class:'btn btn-outline',style:'margin-bottom:14px',onClick:()=>manualStartRest()},
+    `⏱ Spustiť prestávku (${fmtTime(PROFILE.restSeconds||90)})`);
+  container.appendChild(timerBtn);
+
   day.exercises.forEach((ex,idx)=>container.appendChild(renderExerciseCard(day,ex,idx)));
 
   const resetBtn = h('button',{class:'btn btn-ghost',style:'margin-top:16px',onClick:()=>{
@@ -1007,48 +1209,152 @@ function renderExerciseCard(day, ex, idx) {
 
   if (isExpanded) {
     const body = h('div',{class:'ex-body'});
-    const prevBest = getPrevBest(ex.id);
-    if (prevBest) {
-      body.appendChild(h('div',{style:'font-size:11px;color:var(--txtFaint);margin-bottom:10px'},
-        ['Predch. max: ', h('span',{style:'color:var(--pri);font-weight:700'},`${prevBest.weight}kg × ${prevBest.reps}`)]));
+
+    // Návrh progresívneho preťaženia
+    const suggestion = suggestProgression(ex);
+    if (suggestion) {
+      body.appendChild(h('div',{class:'prog-hint'}, '📈 ' + suggestion.reason));
+    } else {
+      const prevBest = getPrevBest(ex.id);
+      if (prevBest) {
+        body.appendChild(h('div',{style:'font-size:11px;color:var(--txtFaint);margin-bottom:10px'},
+          ['Predch. max: ', h('span',{style:'color:var(--pri);font-weight:700'},`${displayWeight(prevBest.weight)}${weightUnit()} × ${prevBest.reps}`)]));
+      }
     }
-    const setHeader = h('div',{class:'set-header'});
-    ['#','Váha (kg)','Opakovania','RIR','✓'].forEach(t=>setHeader.appendChild(h('span',{},t)));
-    body.appendChild(setHeader);
+
+    // Predvyplnené hodnoty: cieľ z plánu + návrh progresu
+    const targetReps = parseBottomReps(ex.reps) || 8;
+    const suggestedWeight = suggestion ? suggestion.weight : null;
+    const suggestedReps = suggestion ? suggestion.reps : targetReps;
 
     for (let si=0; si<ex.sets; si++) {
       const s = (sess.sets||[])[si] || {};
-      const row = h('div',{class:'set-row'});
-      row.appendChild(h('div',{class:'set-num'},String(si+1)));
-      const wInput = h('input',{class:'set-input',type:'number',inputmode:'decimal',placeholder:'kg',value:s.weight||'',
-        onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight',e.target.value); }});
-      row.appendChild(wInput);
-      const rInput = h('input',{class:'set-input',type:'number',inputmode:'numeric',placeholder:'rep',value:s.reps||'',
-        onChange:(e)=>{ setSetVal(day.id,ex.id,si,'reps',e.target.value); }});
-      row.appendChild(rInput);
-      const rirSel = h('select',{class:'rir-select', onChange:(e)=>{ setSetVal(day.id,ex.id,si,'rir',e.target.value); }});
-      rirSel.appendChild(h('option',{value:''},'RIR'));
-      [0,1,2,3,4].forEach(r=>{
-        const opt = h('option',{value:r},String(r));
-        if (String(s.rir)===String(r)) opt.selected = true;
-        rirSel.appendChild(opt);
-      });
-      row.appendChild(rirSel);
-      const checkBtn = h('button',{class:'set-check'+(s.done?' done':''), onClick:()=>{ toggleSetDone(day.id,ex.id,si); }},'✓');
-      row.appendChild(checkBtn);
-      body.appendChild(row);
+      const isDone = !!s.done;
+      // Hodnoty: uložené, alebo predvyplnené z návrhu/cieľa
+      const wVal = s.weight!=null && s.weight!=='' ? displayWeight(parseFloat(s.weight)) : (suggestedWeight!=null ? displayWeight(suggestedWeight) : '');
+      const rVal = s.reps!=null && s.reps!=='' ? s.reps : suggestedReps;
+
+      const block = h('div',{class:'set-block'+(isDone?' done':''), id:`setblock-${ex.id}-${si}`});
+      const top = h('div',{class:'set-block-top'});
+      top.appendChild(h('div',{class:'set-block-label'}, `Séria ${si+1}`));
+      if (s.weight && s.reps) {
+        top.appendChild(h('div',{style:'font-size:11px;color:var(--txtFaint)'}, `${wVal}${weightUnit()} × ${rVal}`));
+      }
+      block.appendChild(top);
+
+      const fields = h('div',{class:'set-fields'});
+
+      // Stepper VÁHA
+      const wStepper = h('div',{class:'stepper'});
+      wStepper.appendChild(h('div',{class:'stepper-label'}, `Váha (${weightUnit()})`));
+      const wRow = h('div',{class:'stepper-row'});
+      const wStep = progStepForMuscle(ex.muscle);
+      wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',-wStep,wVal,rVal)},'−'));
+      const wInput = h('input',{class:'stepper-val',type:'number',inputmode:'decimal',value:wVal,placeholder:'0',
+        onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight', inputToKg(e.target.value)); }});
+      wRow.appendChild(wInput);
+      wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',wStep,wVal,rVal)},'+'));
+      wStepper.appendChild(wRow);
+      fields.appendChild(wStepper);
+
+      // Stepper OPAKOVANIA
+      const rStepper = h('div',{class:'stepper'});
+      rStepper.appendChild(h('div',{class:'stepper-label'}, 'Opakovania'));
+      const rRow = h('div',{class:'stepper-row'});
+      rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',-1,wVal,rVal)},'−'));
+      const rInput = h('input',{class:'stepper-val',type:'number',inputmode:'numeric',value:rVal,placeholder:'0',
+        onChange:(e)=>{ setSetVal(day.id,ex.id,si,'reps', e.target.value); }});
+      rRow.appendChild(rInput);
+      rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',1,wVal,rVal)},'+'));
+      rStepper.appendChild(rRow);
+      fields.appendChild(rStepper);
+
+      // Veľký check button
+      const checkBtn = h('button',{class:'set-check-lg'+(isDone?' done':''), onClick:()=>{
+        completeSet(day.id, ex.id, si, wVal, rVal);
+      }},'✓');
+      fields.appendChild(checkBtn);
+
+      block.appendChild(fields);
+      body.appendChild(block);
     }
 
-    const noteArea = h('textarea',{class:'note-input',rows:'2',placeholder:'Poznámka k cviku...', onChange:(e)=>{ setExNote(day.id,ex.id,e.target.value); }});
+    // RIR (voliteľné, spoločné pre cvik – jednoduchšie)
+    const rirWrap = h('div',{class:'rir-inline'});
+    rirWrap.appendChild(h('label',{},'RIR (rezerva opakovaní):'));
+    const rirSel = h('select',{onChange:(e)=>{ setExField(day.id,ex.id,'rir',e.target.value); }});
+    rirSel.appendChild(h('option',{value:''},'–'));
+    [0,1,2,3,4].forEach(r=>{
+      const opt = h('option',{value:r},String(r));
+      if (String(sess.rir)===String(r)) opt.selected=true;
+      rirSel.appendChild(opt);
+    });
+    rirWrap.appendChild(rirSel);
+    body.appendChild(rirWrap);
+
+    // Poznámka
+    const noteArea = h('textarea',{class:'note-input',rows:'2',placeholder:'Poznámka k cviku...', style:'margin-top:8px', onChange:(e)=>{ setExNote(day.id,ex.id,e.target.value); }});
     noteArea.value = sess.note || '';
-    const noteWrap = h('div',{style:'margin-top:10px'});
-    noteWrap.appendChild(noteArea);
-    body.appendChild(noteWrap);
+    body.appendChild(noteArea);
 
     card.appendChild(body);
   }
 
   return card;
+}
+
+// Stepper +/- úprava – ak ešte nie je hodnota uložená, použije zobrazenú (predvyplnenú)
+function adjustSetField(dayId, exId, setIdx, field, delta, currentW, currentR) {
+  const sess = (SESSION[dayId]||{})[exId] || {};
+  const s = (sess.sets||[])[setIdx] || {};
+  let current;
+  if (field==='weight') {
+    current = s.weight!=null && s.weight!=='' ? parseFloat(displayWeight(parseFloat(s.weight))) : (parseFloat(currentW)||0);
+  } else {
+    current = s.reps!=null && s.reps!=='' ? parseInt(s.reps,10) : (parseInt(currentR,10)||0);
+  }
+  let next = current + delta;
+  if (next < 0) next = 0;
+  if (field==='weight') {
+    setSetVal(dayId, exId, setIdx, 'weight', inputToKg(next));
+  } else {
+    setSetVal(dayId, exId, setIdx, 'reps', String(next));
+  }
+  render();
+}
+
+// Dokončenie série – uloží hodnoty (ak nie sú), zazelení, spustí timer, auto-skok
+function completeSet(dayId, exId, setIdx, displayedW, displayedR) {
+  if (!SESSION[dayId]) SESSION[dayId]={};
+  if (!SESSION[dayId][exId]) SESSION[dayId][exId]={};
+  if (!SESSION[dayId][exId].sets) SESSION[dayId][exId].sets=[];
+  while (SESSION[dayId][exId].sets.length<=setIdx) SESSION[dayId][exId].sets.push({});
+  const s = SESSION[dayId][exId].sets[setIdx];
+
+  if (!s.done) {
+    // Pri zaškrtnutí ulož predvyplnené hodnoty ak ešte nie sú zadané
+    if (s.weight==null || s.weight==='') s.weight = inputToKg(displayedW);
+    if (s.reps==null || s.reps==='') s.reps = String(displayedR);
+    s.done = true;
+    vibrate(15);
+    saveSession();
+    // Spusti časovač prestávky (ak je zapnutý auto-start)
+    if (PROFILE.restAutoStart && PROFILE.restSeconds>0) {
+      startRestTimer(PROFILE.restSeconds);
+    }
+    render();
+  } else {
+    s.done = false;
+    saveSession();
+    render();
+  }
+}
+
+function setExField(dayId, exId, field, val) {
+  if (!SESSION[dayId]) SESSION[dayId]={};
+  if (!SESSION[dayId][exId]) SESSION[dayId][exId]={};
+  SESSION[dayId][exId][field]=val;
+  saveSession();
 }
 
 function setSetVal(dayId, exId, setIdx, field, value) {
@@ -1338,8 +1644,8 @@ function renderTabProfile() {
   [
     ['Cieľ', GOAL_LABELS[PROFILE.goal]??'–'],
     ['Aktivita', ACTIVITY_LABELS[PROFILE.activityLevel]??'–'],
-    ['Hmotnosť', PROFILE.weightKg?`${PROFILE.weightKg} kg`:'–'],
-    ['Výška', PROFILE.heightCm?`${PROFILE.heightCm} cm`:'–'],
+    ['Hmotnosť', PROFILE.weightKg?`${displayWeight(PROFILE.weightKg)} ${weightUnit()}`:'–'],
+    ['Výška', PROFILE.heightCm?`${PROFILE.units==='imperial'?cmToInch(PROFILE.heightCm)+' in':PROFILE.heightCm+' cm'}`:'–'],
   ].forEach(([label,val])=>{
     const row = h('div',{class:'stat-row'});
     row.appendChild(h('span',{class:'stat-label'},label));
@@ -1358,16 +1664,18 @@ function renderTabProfile() {
 
   wrap.appendChild(h('p',{class:'section-title'},'NASTAVENIA'));
   const settingsCard = h('div',{class:'card',style:'padding:0'});
-  [
-    ['👤','Osobné údaje',null],
-    ['🌍','Jazyk','Slovenčina'],
-    ['📏','Jednotky','kg / cm'],
-    ['🔔','Notifikácie',null],
-    ['⌚','Integrácie (Apple Health)',null],
-    ['🎁','Promo kód',null],
-    ['⭐','Predplatné','Free'],
-  ].forEach(([icon,label,val],i,arr)=>{
-    const row = h('div',{class:'setting-row'+(i<arr.length-1?'':''), style: i<arr.length-1 ? 'border-bottom:1px solid var(--border)' : ''});
+  const settings = [
+    ['👤','Osobné údaje',null, ()=>openPersonalDataModal()],
+    ['📏','Jednotky', PROFILE.units==='imperial'?'lbs / in':'kg / cm', ()=>openUnitsModal()],
+    ['⏱','Časovač prestávky', fmtTime(PROFILE.restSeconds||90), ()=>openTimerModal()],
+    ['📈','Progresívne preťaženie', progRuleLabel(), ()=>openProgressionModal()],
+    ['🔔','Notifikácie', PROFILE.notifRest?'Zapnuté':'Vypnuté', ()=>openNotifModal()],
+    ['🎁','Promo kód', PROFILE.promoCode||null, ()=>openPromoModal()],
+    ['🌍','Jazyk','Slovenčina', ()=>alert('Viacjazyčnosť (SK/CZ/EN) pripravujeme v ďalšej aktualizácii.')],
+    ['⭐','Predplatné','Free', ()=>alert('ForgeX je momentálne zadarmo. Premium plán pripravujeme.')],
+  ];
+  settings.forEach(([icon,label,val,onClick],i)=>{
+    const row = h('div',{class:'setting-row', style: i<settings.length-1 ? 'border-bottom:1px solid var(--border)' : '', onClick});
     row.appendChild(h('span',{class:'setting-icon'},icon));
     row.appendChild(h('span',{class:'setting-label'},label));
     if (val) row.appendChild(h('span',{class:'setting-value'},val));
@@ -1376,7 +1684,184 @@ function renderTabProfile() {
   });
   wrap.appendChild(settingsCard);
 
+  // Reset appky
+  wrap.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:16px;color:var(--red)',onClick:()=>{
+    if(!confirm('Vymazať VŠETKY dáta a začať odznova? Toto sa nedá vrátiť.')) return;
+    localStorage.clear();
+    location.reload();
+  }},'Vymazať všetky dáta'));
+
   return wrap;
+}
+
+function progRuleLabel(){
+  const map = {all_sets:'Po všetkých sériách', any_set:'Aspoň 1 séria', aggressive:'Každý tréning', off:'Vypnuté'};
+  return map[PROFILE.progRule]||'Po všetkých sériách';
+}
+
+// ── SETTINGS MODALY ──
+function settingsModal(title, contentBuilder) {
+  const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
+  const sheet = h('div',{class:'modal-sheet'});
+  sheet.appendChild(h('div',{class:'modal-handle'}));
+  sheet.appendChild(h('h2',{style:'margin-bottom:16px'},title));
+  contentBuilder(sheet);
+  sheet.appendChild(h('button',{class:'btn btn-primary',style:'margin-top:8px', onClick:()=>{ closeModal(); render(); }},'Hotovo'));
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+}
+
+function openPersonalDataModal() {
+  settingsModal('Osobné údaje', (sheet)=>{
+    const fields = [
+      ['Meno','name','text',PROFILE.name||''],
+      ['Vek','age','number',PROFILE.age||''],
+      [`Výška (${PROFILE.units==='imperial'?'in':'cm'})`,'heightCm','number', PROFILE.heightCm ? (PROFILE.units==='imperial'?cmToInch(PROFILE.heightCm):PROFILE.heightCm) : ''],
+      [`Hmotnosť (${weightUnit()})`,'weightKg','number', PROFILE.weightKg ? displayWeight(PROFILE.weightKg) : ''],
+    ];
+    fields.forEach(([label,key,type,val])=>{
+      sheet.appendChild(h('label',{class:'input-label'},label));
+      const wrap = h('div',{class:'input-wrap'});
+      const inp = h('input',{type,value:val,'data-key':key, inputmode: type==='number'?'decimal':'text'});
+      wrap.appendChild(inp);
+      sheet.appendChild(wrap);
+    });
+    // Cieľ
+    sheet.appendChild(h('label',{class:'input-label'},'Cieľ'));
+    const goalSeg = h('div',{class:'segment',style:'margin-bottom:14px;flex-wrap:wrap'});
+    Object.entries(GOAL_LABELS).forEach(([k,v])=>{
+      const b = h('button',{class:'segment-btn'+(PROFILE.goal===k?' active':''),style:'flex:1 1 45%', onClick:()=>{ saveProfile({goal:k}); closeModal(); openPersonalDataModal(); }}, v.split(' ')[0]);
+      goalSeg.appendChild(b);
+    });
+    sheet.appendChild(goalSeg);
+    // Aktivita
+    sheet.appendChild(h('label',{class:'input-label'},'Úroveň aktivity'));
+    const actSel = h('select',{class:'chart-select',style:'width:100%;background:var(--surf2);border:1px solid var(--border2);color:var(--txt);border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px'});
+    Object.entries(ACTIVITY_LABELS).forEach(([k,v])=>{
+      const opt=h('option',{value:k},v); if(PROFILE.activityLevel===k) opt.selected=true; actSel.appendChild(opt);
+    });
+    actSel.addEventListener('change',(e)=>saveProfile({activityLevel:e.target.value}));
+    sheet.appendChild(actSel);
+
+    // Pri zatvorení ulož textové polia (override Hotovo tlačidla cez listener na inputy)
+    sheet.querySelectorAll('input[data-key]').forEach(inp=>{
+      inp.addEventListener('change',(e)=>{
+        const key=e.target.getAttribute('data-key');
+        let v=e.target.value;
+        if (key==='heightCm') { v = PROFILE.units==='imperial' ? Math.round(parseFloat(v)*2.54*10)/10 : parseFloat(v); }
+        else if (key==='weightKg') { v = inputToKg(v); }
+        else if (key==='age') { v = parseInt(v,10); }
+        saveProfile({[key]: v||null});
+      });
+    });
+  });
+}
+
+function openUnitsModal() {
+  settingsModal('Jednotky', (sheet)=>{
+    sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Vyber systém jednotiek. Hodnoty sa automaticky prepočítajú.'));
+    const seg = h('div',{class:'segment'});
+    [['metric','Metrické (kg / cm)'],['imperial','Imperiálne (lbs / in)']].forEach(([k,label])=>{
+      seg.appendChild(h('button',{class:'segment-btn'+(PROFILE.units===k?' active':''), onClick:()=>{ saveProfile({units:k}); closeModal(); openUnitsModal(); }}, label));
+    });
+    sheet.appendChild(seg);
+  });
+}
+
+function openTimerModal() {
+  settingsModal('Časovač prestávky', (sheet)=>{
+    sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Dĺžka prestávky medzi sériami.'));
+    // Rýchle voľby
+    const quick = h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px'});
+    [30,60,90,120,150,180].forEach(sec=>{
+      const active = PROFILE.restSeconds===sec;
+      quick.appendChild(h('button',{class:'btn btn-sm '+(active?'btn-primary':'btn-outline'),style:'flex:1 1 28%', onClick:()=>{ saveProfile({restSeconds:sec}); closeModal(); openTimerModal(); }}, fmtTime(sec)));
+    });
+    sheet.appendChild(quick);
+    // Vlastný čas
+    sheet.appendChild(h('label',{class:'input-label'},'Vlastný čas (sekundy)'));
+    const wrap = h('div',{class:'input-wrap'});
+    const inp = h('input',{type:'number',inputmode:'numeric',value:PROFILE.restSeconds||90, onChange:(e)=>{ const v=parseInt(e.target.value,10); if(v>0) saveProfile({restSeconds:v}); }});
+    wrap.appendChild(inp); wrap.appendChild(h('span',{class:'unit'},'s'));
+    sheet.appendChild(wrap);
+    // Auto-start toggle
+    const toggleRow = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
+    toggleRow.appendChild(h('span',{class:'setting-label'},'Automaticky spustiť po sérii'));
+    const tg = h('button',{class:'toggle'+(PROFILE.restAutoStart?' on':''), onClick:()=>{ saveProfile({restAutoStart:!PROFILE.restAutoStart}); closeModal(); openTimerModal(); }});
+    tg.appendChild(h('div',{class:'toggle-knob'}));
+    toggleRow.appendChild(tg);
+    sheet.appendChild(toggleRow);
+  });
+}
+
+function openProgressionModal() {
+  settingsModal('Progresívne preťaženie', (sheet)=>{
+    sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Kedy ti appka navrhne pridať váhu?'));
+    const rules = [['all_sets','Po dosiahnutí horného rozsahu na všetkých sériách'],['any_set','Po dosiahnutí horného rozsahu aspoň raz'],['aggressive','Skúsiť pridať každý tréning'],['off','Vypnuté (žiadne návrhy)']];
+    rules.forEach(([k,label])=>{
+      const row = h('div',{class:'select-card'+(PROFILE.progRule===k?' selected':''), onClick:()=>{ saveProfile({progRule:k}); closeModal(); openProgressionModal(); }});
+      row.appendChild(h('div',{class:'label'},[h('div',{class:'label-main',style:'font-size:13px'},label)]));
+      if (PROFILE.progRule===k) row.appendChild(h('div',{class:'check-dot'},'✓'));
+      sheet.appendChild(row);
+    });
+    // Krok váhy
+    sheet.appendChild(h('label',{class:'input-label',style:'margin-top:8px'},`Prírastok – vrch tela (${weightUnit()})`));
+    const w1=h('div',{class:'input-wrap'});
+    w1.appendChild(h('input',{type:'number',inputmode:'decimal',value:displayWeight(PROFILE.progStepUpper||2.5),onChange:(e)=>saveProfile({progStepUpper:inputToKg(e.target.value)})}));
+    sheet.appendChild(w1);
+    sheet.appendChild(h('label',{class:'input-label'},`Prírastok – nohy (${weightUnit()})`));
+    const w2=h('div',{class:'input-wrap'});
+    w2.appendChild(h('input',{type:'number',inputmode:'decimal',value:displayWeight(PROFILE.progStepLower||5),onChange:(e)=>saveProfile({progStepLower:inputToKg(e.target.value)})}));
+    sheet.appendChild(w2);
+  });
+}
+
+function openNotifModal() {
+  settingsModal('Notifikácie', (sheet)=>{
+    const supported = ('Notification' in window);
+    if (!supported) {
+      sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px'},'Tvoj prehliadač nepodporuje notifikácie. Na iPhone pridaj appku na plochu, aby fungovali.'));
+      return;
+    }
+    const perm = Notification.permission;
+    if (perm!=='granted') {
+      sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Povoľ notifikácie, aby ťa appka upozornila keď skončí prestávka.'));
+      sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ requestNotifPermission(); closeModal(); }},'🔔 Povoliť notifikácie'));
+    } else {
+      const toggleRow = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
+      toggleRow.appendChild(h('span',{class:'setting-label'},'Upozornenie po prestávke'));
+      const tg = h('button',{class:'toggle'+(PROFILE.notifRest?' on':''), onClick:()=>{ saveProfile({notifRest:!PROFILE.notifRest}); closeModal(); openNotifModal(); }});
+      tg.appendChild(h('div',{class:'toggle-knob'}));
+      toggleRow.appendChild(tg);
+      sheet.appendChild(toggleRow);
+    }
+  });
+}
+
+function openPromoModal() {
+  settingsModal('Promo kód', (sheet)=>{
+    if (PROFILE.promoCode) {
+      sheet.appendChild(h('div',{class:'card card-accent',style:'margin-bottom:14px'},[
+        h('div',{style:'color:var(--txtDim);font-size:12px'},'Aktívny kód'),
+        h('div',{style:'color:var(--pri);font-size:18px;font-weight:800;margin-top:2px'},PROFILE.promoCode),
+      ]));
+      sheet.appendChild(h('button',{class:'btn btn-ghost',style:'color:var(--red)', onClick:()=>{ saveProfile({promoCode:null}); closeModal(); openPromoModal(); }},'Odstrániť kód'));
+      return;
+    }
+    sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Zadaj promo kód ak ho máš.'));
+    const wrap = h('div',{class:'input-wrap'});
+    const inp = h('input',{type:'text',placeholder:'napr. FORGEX2026', id:'promo-input', style:'text-transform:uppercase'});
+    wrap.appendChild(inp);
+    sheet.appendChild(wrap);
+    sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
+      const val = (document.getElementById('promo-input')?.value||'').trim().toUpperCase();
+      if (!val) return;
+      // Demo validácia – reálne kódy budú overené cez backend
+      saveProfile({promoCode:val});
+      alert('Kód uložený. Bude overený pri pripojení k účtu (pripravujeme).');
+      closeModal(); render();
+    }},'Uplatniť kód'));
+  });
 }
 
 function themeSwatch(key, name, emoji, priColor, bgColor) {
@@ -1399,6 +1884,7 @@ function themeSwatch(key, name, emoji, priColor, bgColor) {
 let splitEditingId = null;   // ID splitu ktorý sa práve edituje (v split_edit_day)
 let splitEditingDayId = null; // ID konkrétneho dňa v rámci splitu, ktorý sa edituje
 let newSplitDaysCount = 3;    // vybraný počet dní v split_new
+let splitDraft = null;        // vygenerovaný návrh splitu čakajúci na potvrdenie (split_preview)
 
 function backToTraining() {
   activeTab = 'training';
@@ -1462,13 +1948,13 @@ function renderSplitManage() {
 
 function renderSplitNew() {
   const screen = h('div', {class:'screen'});
-  const top = h('div', {class:'safe-top', style:'padding:16px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
+  const top = h('div', {style:'padding:calc(var(--safeT) + 16px) var(--pad) 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
   top.appendChild(h('button',{class:'icon-btn', onClick:()=>navigate('split_manage')},'←'));
   top.appendChild(h('h2',{},'Nový split'));
   screen.appendChild(top);
 
   const scroll = h('div',{class:'scroll'});
-  scroll.appendChild(h('p',{class:'subtitle'},'Vyber koľko dní týždenne chceš cvičiť. Appka navrhne osvedčený split a predvyplní cviky – všetko si potom môžeš upraviť.'));
+  scroll.appendChild(h('p',{class:'subtitle'},'Vyber koľko dní týždenne chceš cvičiť. Appka navrhne osvedčený split a predvyplní cviky.'));
 
   const grid = h('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:20px'});
   for (let n=1;n<=7;n++) {
@@ -1481,9 +1967,9 @@ function renderSplitNew() {
   }
   scroll.appendChild(grid);
 
-  const tpl = SPLIT_TEMPLATES[newSplitDaysCount];
+  const tpl = getTemplate(newSplitDaysCount, PROFILE.gender);
   const previewCard = h('div',{class:'card card-accent',style:'margin-top:20px'});
-  previewCard.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px'},'Navrhovaný typ splitu'));
+  previewCard.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px'},'Navrhovaný typ splitu'+(PROFILE.gender==='female'?' (ženský)':'')));
   previewCard.appendChild(h('div',{style:'color:var(--pri);font-size:18px;font-weight:800;margin-top:4px'},tpl.name));
   const dayList = h('div',{style:'margin-top:10px;display:flex;flex-direction:column;gap:6px'});
   tpl.days.forEach(d=>{
@@ -1497,16 +1983,101 @@ function renderSplitNew() {
 
   screen.appendChild(scroll);
 
-  const bottom = h('div',{class:'safe-bot',style:'padding:16px 20px'});
+  const bottom = h('div',{style:'padding:16px var(--pad) calc(var(--safeB) + 16px)'});
   bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
-    const newSplit = generateSplitFromTemplate(newSplitDaysCount);
-    CUSTOM_SPLITS.push(newSplit);
+    splitDraft = generateSplitFromTemplate(newSplitDaysCount, PROFILE.gender);
+    navigate('split_preview');
+  }},'Zobraziť návrh s cvikmi'));
+  screen.appendChild(bottom);
+
+  return screen;
+}
+
+const WEEKDAYS = [
+  {key:1,short:'Po',name:'Pondelok'},
+  {key:2,short:'Ut',name:'Utorok'},
+  {key:3,short:'St',name:'Streda'},
+  {key:4,short:'Št',name:'Štvrtok'},
+  {key:5,short:'Pi',name:'Piatok'},
+  {key:6,short:'So',name:'Sobota'},
+  {key:0,short:'Ne',name:'Nedeľa'},
+];
+
+function renderSplitPreview() {
+  if (!splitDraft) { navigate('split_new'); return h('div',{class:'screen'}); }
+  const screen = h('div', {class:'screen'});
+  const top = h('div', {style:'padding:calc(var(--safeT) + 16px) var(--pad) 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
+  top.appendChild(h('button',{class:'icon-btn', onClick:()=>navigate('split_new')},'←'));
+  top.appendChild(h('h2',{},'Návrh splitu'));
+  screen.appendChild(top);
+
+  const scroll = h('div',{class:'scroll'});
+  scroll.appendChild(h('div',{style:'color:var(--pri);font-size:20px;font-weight:800'},splitDraft.name));
+  scroll.appendChild(h('p',{class:'subtitle',style:'margin-top:4px'},'Toto je návrh. Súhlasíš s ním, alebo si chceš cviky upraviť?'));
+
+  // Každý deň s konkrétnymi cvikmi + priradenie dňa týždňa
+  splitDraft.days.forEach((day, di)=>{
+    const dayCard = h('div',{class:'card',style:'margin-top:14px'});
+    dayCard.appendChild(h('div',{style:'display:flex;align-items:center;justify-content:space-between;margin-bottom:4px'},[
+      h('div',{style:'color:var(--txt);font-weight:800;font-size:16px'},`${day.label} · ${day.title}`),
+    ]));
+    dayCard.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px;margin-bottom:10px'},day.subtitle));
+
+    // Priradenie dňa týždňa
+    const weekdayRow = h('div',{style:'display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px'});
+    WEEKDAYS.forEach(wd=>{
+      const selected = day.weekday===wd.key;
+      const btn = h('button',{
+        class:'btn btn-sm',
+        style:`flex:1;min-width:38px;padding:7px 0;background:${selected?'var(--pri)':'var(--surf3)'};color:${selected?'#fff':'var(--txtDim)'}`,
+        onClick:()=>{
+          // Zruš ten istý deň u iných dní (jeden weekday = jeden tréning)
+          splitDraft.days.forEach(d=>{ if(d.weekday===wd.key) d.weekday=null; });
+          day.weekday = selected ? null : wd.key;
+          render();
+        }
+      }, wd.short);
+      weekdayRow.appendChild(btn);
+    });
+    dayCard.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-bottom:4px'},'Deň v týždni (voliteľné):'));
+    dayCard.appendChild(weekdayRow);
+
+    // Zoznam cvikov
+    day.exercises.forEach((ex,i)=>{
+      const exRow = h('div',{style:'display:flex;align-items:center;gap:10px;padding:6px 0'+(i<day.exercises.length-1?';border-bottom:1px solid var(--border)':'')});
+      exRow.appendChild(h('div',{class:'ex-num',style:'width:22px;height:22px;font-size:10px'},String(i+1)));
+      const info = h('div',{style:'flex:1'});
+      info.appendChild(h('div',{style:'color:var(--txt);font-size:13px;font-weight:500'},ex.name));
+      info.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px'},`${ex.sets}× ${ex.reps}`));
+      exRow.appendChild(info);
+      dayCard.appendChild(exRow);
+    });
+
+    scroll.appendChild(dayCard);
+  });
+
+  screen.appendChild(scroll);
+
+  const bottom = h('div',{style:'padding:16px var(--pad) calc(var(--safeB) + 16px);display:flex;flex-direction:column;gap:10px'});
+  bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
+    // Súhlasím – ulož split tak ako je
+    CUSTOM_SPLITS.push(splitDraft);
     saveSplits();
-    ACTIVE_SPLIT_ID = newSplit.id;
+    ACTIVE_SPLIT_ID = splitDraft.id;
     saveActiveSplitId();
-    splitEditingId = newSplit.id;
+    splitDraft = null;
+    backToTraining();
+  }},'✓ Súhlasím, použiť tento split'));
+  bottom.appendChild(h('button',{class:'btn btn-outline', onClick:()=>{
+    // Chcem upraviť – ulož a otvor editor
+    CUSTOM_SPLITS.push(splitDraft);
+    saveSplits();
+    ACTIVE_SPLIT_ID = splitDraft.id;
+    saveActiveSplitId();
+    splitEditingId = splitDraft.id;
+    splitDraft = null;
     navigate('split_edit_day');
-  }},'Vytvoriť a upraviť cviky'));
+  }},'✏️ Chcem upraviť cviky'));
   screen.appendChild(bottom);
 
   return screen;
@@ -1517,7 +2088,7 @@ function renderSplitEditDay() {
   const screen = h('div', {class:'screen'});
 
   if (!split) {
-    const top = h('div', {class:'safe-top', style:'padding:16px 20px;display:flex;align-items:center;gap:12px'});
+    const top = h('div', {style:'padding:calc(var(--safeT) + 16px) var(--pad) 16px;display:flex;align-items:center;gap:12px'});
     top.appendChild(h('button',{class:'icon-btn', onClick:()=>navigate('split_manage')},'←'));
     top.appendChild(h('h2',{},'Split nenájdený'));
     screen.appendChild(top);
@@ -1528,7 +2099,7 @@ function renderSplitEditDay() {
     splitEditingDayId = split.days[0]?.id;
   }
 
-  const top = h('div', {class:'safe-top', style:'padding:16px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
+  const top = h('div', {style:'padding:calc(var(--safeT) + 16px) var(--pad) 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
   top.appendChild(h('button',{class:'icon-btn', onClick:()=>navigate('split_manage')},'←'));
   const titleWrap = h('div',{style:'flex:1'});
   const nameInput = h('input',{value:split.name, style:'background:transparent;border:none;outline:none;color:var(--txt);font-size:18px;font-weight:800;width:100%',
@@ -1537,7 +2108,7 @@ function renderSplitEditDay() {
   top.appendChild(titleWrap);
   screen.appendChild(top);
 
-  const dayTabs = h('div',{style:'display:flex;gap:6px;padding:14px 20px;overflow-x:auto'});
+  const dayTabs = h('div',{style:'display:flex;gap:6px;padding:14px var(--pad);overflow-x:auto'});
   split.days.forEach(d=>{
     const btn = h('button',{class:'btn btn-sm', style:`flex-shrink:0;background:${splitEditingDayId===d.id?'var(--pri)':'var(--surf3)'};color:${splitEditingDayId===d.id?'#fff':'var(--txtDim)'}`,
       onClick:()=>{ splitEditingDayId=d.id; render(); }}, d.label);
@@ -1559,6 +2130,24 @@ function renderSplitEditDay() {
   dayTitleRow.appendChild(daySubInput);
   scroll.appendChild(dayTitleRow);
 
+  // Priradenie dňa v týždni
+  scroll.appendChild(h('label',{class:'input-label'},'Deň v týždni (voliteľné)'));
+  const weekdayRow = h('div',{style:'display:flex;gap:5px;flex-wrap:wrap;margin-bottom:16px'});
+  WEEKDAYS.forEach(wd=>{
+    const selected = day.weekday===wd.key;
+    const btn = h('button',{
+      class:'btn btn-sm',
+      style:`flex:1;min-width:38px;padding:7px 0;background:${selected?'var(--pri)':'var(--surf3)'};color:${selected?'#fff':'var(--txtDim)'}`,
+      onClick:()=>{
+        split.days.forEach(d=>{ if(d.weekday===wd.key) d.weekday=null; });
+        day.weekday = selected ? null : wd.key;
+        saveSplits(); render();
+      }
+    }, wd.short);
+    weekdayRow.appendChild(btn);
+  });
+  scroll.appendChild(weekdayRow);
+
   scroll.appendChild(h('p',{class:'section-title'},`CVIKY (${day.exercises.length})`));
 
   if (!day.exercises.length) {
@@ -1569,13 +2158,15 @@ function renderSplitEditDay() {
 
   day.exercises.forEach((ex,idx)=>{
     const row = h('div',{class:'ex-card', style:'margin-bottom:8px'});
-    const rowInner = h('div',{style:'display:flex;align-items:center;gap:10px;padding:12px 14px'});
+    const rowInner = h('div',{style:'display:flex;align-items:center;gap:8px;padding:12px 14px'});
     rowInner.appendChild(h('div',{class:'ex-num'},String(idx+1)));
-    const info = h('div',{style:'flex:1'});
+    const info = h('div',{style:'flex:1;min-width:0'});
     info.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:14px'},ex.name));
     info.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:2px'},`${ex.sets}× ${ex.reps} · ${MUSCLE_LABELS[ex.muscle]||''}`));
     rowInner.appendChild(info);
 
+    // Tlačidlo VÝMENY cviku za alternatívu z rovnakej partie
+    const swapBtn = h('button',{class:'btn btn-ghost btn-sm', style:'padding:6px 9px', onClick:()=>openExerciseSwapModal(day, idx)},'↻');
     const upBtn = h('button',{class:'btn btn-ghost btn-sm', style:'padding:6px 9px', onClick:()=>{
       if (idx===0) return;
       [day.exercises[idx-1],day.exercises[idx]]=[day.exercises[idx],day.exercises[idx-1]];
@@ -1589,7 +2180,7 @@ function renderSplitEditDay() {
     const delBtn = h('button',{class:'btn btn-ghost btn-sm', style:'padding:6px 9px;color:var(--red)', onClick:()=>{
       day.exercises.splice(idx,1); saveSplits(); render();
     }},'✕');
-    rowInner.appendChild(upBtn); rowInner.appendChild(downBtn); rowInner.appendChild(delBtn);
+    rowInner.appendChild(swapBtn); rowInner.appendChild(upBtn); rowInner.appendChild(downBtn); rowInner.appendChild(delBtn);
     row.appendChild(rowInner);
     scroll.appendChild(row);
   });
@@ -1599,25 +2190,58 @@ function renderSplitEditDay() {
 
   screen.appendChild(scroll);
 
-  const bottom = h('div',{class:'safe-bot',style:'padding:16px 20px'});
+  const bottom = h('div',{style:'padding:16px var(--pad) calc(var(--safeB) + 16px)'});
   bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>navigate('split_manage')},'Hotovo'));
   screen.appendChild(bottom);
 
   return screen;
 }
 
+// Modal na výmenu cviku za alternatívu z rovnakej svalovej partie
+function openExerciseSwapModal(day, exIdx) {
+  const currentEx = day.exercises[exIdx];
+  const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
+  const sheet = h('div',{class:'modal-sheet', style:'max-height:80vh'});
+  sheet.appendChild(h('div',{class:'modal-handle'}));
+  sheet.appendChild(h('h2',{style:'margin-bottom:4px'},'Vymeniť cvik'));
+  sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'}, `Alternatívy pre: ${MUSCLE_LABELS[currentEx.muscle]||'cvik'}`));
+
+  const alternatives = EXERCISE_LIBRARY.filter(e=>e.muscle===currentEx.muscle && e.id!==currentEx.id);
+  alternatives.forEach(ex=>{
+    const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center;justify-content:space-between',
+      onClick:()=>{
+        day.exercises[exIdx] = { id:ex.id, name:ex.name, sets:ex.sets, reps:adjustRepsForGender(ex.reps, PROFILE.gender), note:ex.note, muscle:ex.muscle };
+        saveSplits();
+        closeModal();
+        render();
+      }});
+    const left = h('div');
+    left.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:14px'},ex.name));
+    left.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:3px'},`${ex.sets}× ${ex.reps} · ${ex.equipment}`));
+    row.appendChild(left);
+    row.appendChild(h('span',{style:'color:var(--pri);font-size:16px'},'↻'));
+    sheet.appendChild(row);
+  });
+  if (!alternatives.length) sheet.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:20px'},'Žiadne alternatívy v knižnici'));
+
+  sheet.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:8px', onClick:closeModal},'Zavrieť'));
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+}
+
 let pickerMuscleFilter = 'all';
 function openExercisePickerModal(day) {
+  pickerMuscleFilter = 'all'; // reset pri každom otvorení
   const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
   const sheet = h('div',{class:'modal-sheet', style:'max-height:80vh'});
   sheet.appendChild(h('div',{class:'modal-handle'}));
   sheet.appendChild(h('h2',{style:'margin-bottom:12px'},'Vyber cvik'));
 
-  const filterRow = h('div',{style:'display:flex;gap:6px;overflow-x:auto;padding-bottom:12px;margin-bottom:8px'});
-  const allBtn = h('button',{class:'btn btn-sm '+(pickerMuscleFilter==='all'?'btn-primary':'btn-outline'), style:'flex-shrink:0', onClick:()=>{ pickerMuscleFilter='all'; refreshPicker(); }},'Všetky');
+  const filterRow = h('div',{id:'picker-filters', style:'display:flex;gap:6px;overflow-x:auto;padding-bottom:12px;margin-bottom:8px'});
+  const allBtn = h('button',{class:'btn btn-sm btn-primary', 'data-filter':'all', style:'flex-shrink:0', onClick:()=>{ pickerMuscleFilter='all'; refreshPicker(); }},'Všetky');
   filterRow.appendChild(allBtn);
   MUSCLE_GROUP_ORDER.forEach(m=>{
-    const btn = h('button',{class:'btn btn-sm '+(pickerMuscleFilter===m?'btn-primary':'btn-outline'), style:'flex-shrink:0', onClick:()=>{ pickerMuscleFilter=m; refreshPicker(); }}, MUSCLE_LABELS[m]);
+    const btn = h('button',{class:'btn btn-sm btn-outline', 'data-filter':m, style:'flex-shrink:0', onClick:()=>{ pickerMuscleFilter=m; refreshPicker(); }}, MUSCLE_LABELS[m]);
     filterRow.appendChild(btn);
   });
   sheet.appendChild(filterRow);
@@ -1629,6 +2253,14 @@ function openExercisePickerModal(day) {
   document.body.appendChild(overlay);
 
   function refreshPicker() {
+    // Aktualizuj vysvietenie filtračných tlačidiel
+    const filters = document.getElementById('picker-filters');
+    if (filters) {
+      filters.querySelectorAll('button[data-filter]').forEach(b=>{
+        const active = b.getAttribute('data-filter')===pickerMuscleFilter;
+        b.className = 'btn btn-sm ' + (active?'btn-primary':'btn-outline');
+      });
+    }
     const list = document.getElementById('picker-list');
     if (!list) return;
     list.innerHTML='';
@@ -1636,7 +2268,7 @@ function openExercisePickerModal(day) {
     filtered.forEach(ex=>{
       const row = h('div',{class:'card',style:'margin-bottom:8px;display:flex;align-items:center;justify-content:space-between',
         onClick:()=>{
-          day.exercises.push({ id:ex.id, name:ex.name, sets:ex.sets, reps:ex.reps, note:ex.note, muscle:ex.muscle });
+          day.exercises.push({ id:ex.id, name:ex.name, sets:ex.sets, reps:adjustRepsForGender(ex.reps, PROFILE.gender), note:ex.note, muscle:ex.muscle });
           saveSplits();
           closeModal();
           render();
@@ -1651,6 +2283,91 @@ function openExercisePickerModal(day) {
     if (!filtered.length) list.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:20px'},'Žiadne cviky v tejto kategórii'));
   }
   refreshPicker();
+}
+
+// ═══════════════════════════ REST TIMER ════════════════════════════════
+let restTimerInterval = null;
+let restTimerRemaining = 0;
+
+function startRestTimer(seconds) {
+  stopRestTimer();
+  restTimerRemaining = seconds;
+  renderRestTimer();
+  restTimerInterval = setInterval(()=>{
+    restTimerRemaining--;
+    if (restTimerRemaining <= 0) {
+      stopRestTimer();
+      vibrate([200,100,200]);
+      if (PROFILE.notifRest) showRestDoneNotification();
+    } else {
+      updateRestTimerDisplay();
+    }
+  }, 1000);
+}
+
+function stopRestTimer() {
+  if (restTimerInterval) { clearInterval(restTimerInterval); restTimerInterval=null; }
+  const el = document.getElementById('rest-timer');
+  if (el) el.remove();
+}
+
+function addRestTime(delta) {
+  restTimerRemaining = Math.max(0, restTimerRemaining + delta);
+  if (restTimerRemaining===0) { stopRestTimer(); return; }
+  updateRestTimerDisplay();
+}
+
+function fmtTime(s) {
+  const m = Math.floor(s/60);
+  const sec = s%60;
+  return m>0 ? `${m}:${String(sec).padStart(2,'0')}` : `${sec}s`;
+}
+
+function renderRestTimer() {
+  let el = document.getElementById('rest-timer');
+  if (el) el.remove();
+  el = h('div',{id:'rest-timer'});
+  const inner = h('div',{class:'rest-timer-inner'});
+  const timeWrap = h('div',{});
+  timeWrap.appendChild(h('div',{class:'rest-time',id:'rest-time-val'}, fmtTime(restTimerRemaining)));
+  timeWrap.appendChild(h('div',{class:'rest-label'},'Prestávka'));
+  inner.appendChild(timeWrap);
+  const btns = h('div',{class:'rest-btns'});
+  btns.appendChild(h('button',{class:'rest-mini-btn', onClick:()=>addRestTime(-15)},'−15s'));
+  btns.appendChild(h('button',{class:'rest-mini-btn', onClick:()=>addRestTime(15)},'+15s'));
+  btns.appendChild(h('button',{class:'rest-mini-btn', onClick:()=>stopRestTimer()},'Skip'));
+  inner.appendChild(btns);
+  el.appendChild(inner);
+  document.body.appendChild(el);
+}
+
+function updateRestTimerDisplay() {
+  const val = document.getElementById('rest-time-val');
+  if (val) val.textContent = fmtTime(restTimerRemaining);
+  else renderRestTimer();
+}
+
+function showRestDoneNotification() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    try { new Notification('ForgeX', { body:'Prestávka skončila – späť do akcie! 💪', icon:'icons/icon-192.png' }); } catch(e){}
+  }
+}
+
+function requestNotifPermission() {
+  if (!('Notification' in window)) { alert('Tvoj prehliadač nepodporuje notifikácie.'); return; }
+  Notification.requestPermission().then(perm=>{
+    if (perm==='granted') {
+      saveProfile({notifRest:true});
+      try { new Notification('ForgeX', { body:'Notifikácie zapnuté ✓' }); } catch(e){}
+    }
+    render();
+  });
+}
+
+// Manuálne spustenie časovača (tlačidlo v tréningu)
+function manualStartRest() {
+  startRestTimer(PROFILE.restSeconds || 90);
 }
 
 // ═══════════════════════════ INIT ═══════════════════════════════════════
