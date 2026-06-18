@@ -235,6 +235,7 @@ const DEFAULT_PROFILE = {
   progStepUpper:2.5,         // krok váhy pre vrch tela (kg)
   progStepLower:5,           // krok váhy pre nohy (kg)
   progRule:'all_sets',       // 'all_sets' | 'any_set' | 'aggressive' | 'off'
+  showRIR:false,             // zobrazovať RIR pole (pre pokročilých); default skryté
 };
 let PROFILE = { ...DEFAULT_PROFILE, ...(DB.get('profile')||{}) };
 function saveProfile(patch){ PROFILE = { ...PROFILE, ...patch }; DB.set('profile', PROFILE); }
@@ -417,6 +418,48 @@ function getExerciseById(id) {
   return EXERCISE_LIBRARY.find(e=>e.id===id) || DAYS.flatMap(d=>d.exercises).find(e=>e.id===id);
 }
 
+// ───────────────────────── PORADIE CVIKOV (zložené → izolačné) ──────────
+// Nižšie číslo = ťažší/zloženejší cvik = patrí skôr v tréningu.
+// Odvodené z vybavenia + známych zložených pohybov.
+const COMPOUND_IDS = new Set([
+  'bench','inclinebar','flatdb','incpress','dips','pushup',          // hrudník zložené
+  'pullup','barbellrow','rowneut','rowover','tbarrow','onearmrow','latpull','latpull2', // chrbát zložené
+  'ohp','dbshoulderpress','arnoldpress',                            // ramená tlaky
+  'backsquat','frontsquat','hacken','legpress','lungesdb','splitsquat', // nohy zložené
+  'rdl','stiffleg','gooddmorning','hipthrust','sumosquat',          // hinge/glutes zložené
+  'closegripbench','dipstriceps',                                   // triceps zložené
+]);
+function exerciseOrderRank(ex){
+  // 1 = ťažký zložený (veľká činka/bodyweight + compound)
+  // 2 = stredný (jednoručky compound, stroje compound)
+  // 3 = izolácia (kladky, peckdeck, upažovanie, curls...)
+  // 4 = lýtka, brucho, predlaktia (vždy na koniec)
+  if (['calves','core','forearms'].includes(ex.muscle)) return 4;
+  const isCompound = COMPOUND_IDS.has(ex.id);
+  if (isCompound) {
+    if (ex.equipment==='barbell' || ex.equipment==='bodyweight') return 1;
+    return 2; // dumbbell/machine compound
+  }
+  return 3; // izolácia (cable, peckdeck, machine isolation, dumbbell isolation)
+}
+// Zoradí pole cvikov podľa odporúčaného poradia (stabilne – zachová relatívne poradie v rámci ranku)
+function sortExercisesByOrder(exercises){
+  return exercises
+    .map((ex,i)=>({ex,i,rank:exerciseOrderRank(ex)}))
+    .sort((a,b)=> a.rank!==b.rank ? a.rank-b.rank : a.i-b.i)
+    .map(o=>o.ex);
+}
+// Zistí, či je poradie cvikov nelogické (izolácia/malá partia pred zloženým cvikom)
+function hasIllogicalOrder(exercises){
+  let maxRankSoFar = 0;
+  for (const ex of exercises){
+    const r = exerciseOrderRank(ex);
+    if (r < maxRankSoFar) return true; // ťažší cvik prišiel po ľahšom
+    maxRankSoFar = Math.max(maxRankSoFar, r);
+  }
+  return false;
+}
+
 // ───────────────────────── SPLIT TEMPLATES (návrh podľa počtu dní) ──────
 // Pre každý počet dní (1-7) appka navrhne typ splitu a predvyplní cviky
 // z knižnice na základe svalovej skupiny. Užívateľ potom môže upraviť.
@@ -548,7 +591,7 @@ function generateSplitFromTemplate(daysPerWeek, gender) {
     title: d.title,
     subtitle: d.subtitle,
     weekday: null, // priradenie dňa týždňa (bod 4) – null = nepriradené
-    exercises: pickExercises(d.muscles, 2, g).map(ex=>({ id:ex.id, name:ex.name, sets:ex.sets, reps:ex.reps, note:ex.note, muscle:ex.muscle })),
+    exercises: sortExercisesByOrder(pickExercises(d.muscles, 2, g)).map(ex=>({ id:ex.id, name:ex.name, sets:ex.sets, reps:ex.reps, note:ex.note, muscle:ex.muscle })),
   }));
   return { id:'split_'+Date.now(), name: tpl.name, daysPerWeek, gender:g, days };
 }
@@ -591,6 +634,7 @@ let currentRoute = PROFILE.onboardingComplete ? 'home' : 'welcome';
 let activeTab = 'home';
 let activeDayId = DAYS[0].id;
 let expandedEx = {};
+let lastAutoExpandedDay = null; // sleduje pre ktorý deň už prebehlo auto-rozbalenie
 
 function navigate(route) {
   currentRoute = route;
@@ -1143,6 +1187,13 @@ function renderDayPlan(activeDays) {
   const doneEx = day.exercises.filter(ex=>isExDone(day.id,ex)).length;
   const pct = Math.round((doneEx/day.exercises.length)*100);
 
+  // Auto-rozbalenie prvého nedokončeného cviku pri vstupe na deň (len raz)
+  if (lastAutoExpandedDay !== day.id) {
+    lastAutoExpandedDay = day.id;
+    const firstUndone = day.exercises.find(ex=>!isExDone(day.id,ex));
+    if (firstUndone) expandedEx[firstUndone.id] = true;
+  }
+
   const container = h('div',{});
 
   const header = h('div',{class:'day-header'});
@@ -1167,14 +1218,32 @@ function renderDayPlan(activeDays) {
   progWrap.appendChild(progTrack);
   container.appendChild(progWrap);
 
+  // Počet dokončených sérií (pre tlačidlo Ukončiť)
+  const doneSetsCount = day.exercises.reduce((a,ex)=>{
+    const sess=(SESSION[day.id]||{})[ex.id]||{};
+    return a + (sess.sets||[]).filter(s=>s.done).length;
+  },0);
+
   if (doneEx===day.exercises.length) {
     const banner = h('div',{class:'card',style:'background:var(--greenDim);border-color:var(--green);text-align:center;margin-bottom:12px'});
     banner.appendChild(h('div',{style:'font-size:28px;margin-bottom:6px'},'💪'));
-    banner.appendChild(h('div',{style:'font-weight:700;color:var(--green);font-size:15px'},'Tréning dokončený!'));
-    banner.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px;margin-top:3px'},`Všetky cviky splnené · ${totalSets} sérií`));
-    const saveBtn = h('button',{class:'btn btn-ghost btn-sm',style:'margin-top:12px',onClick:()=>finishWorkout(day)},'Uložiť do histórie');
+    banner.appendChild(h('div',{style:'font-weight:700;color:var(--green);font-size:15px'},'Všetky cviky splnené!'));
+    banner.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px;margin-top:3px'},`${totalSets} sérií dokončených`));
+    const saveBtn = h('button',{class:'btn',style:'margin-top:12px;background:var(--green);color:#fff',onClick:()=>finishWorkout(day)},'✓ Ukončiť a uložiť tréning');
     banner.appendChild(saveBtn);
     container.appendChild(banner);
+  } else if (doneSetsCount>0) {
+    // Tréning rozrobený – ponúkni ukončiť aj keď nie je všetko hotové
+    const partialBar = h('div',{class:'card',style:'margin-bottom:12px;display:flex;align-items:center;gap:12px'});
+    const info = h('div',{style:'flex:1'});
+    info.appendChild(h('div',{style:'color:var(--txt);font-weight:700;font-size:14px'},`${doneSetsCount} sérií · ${doneEx}/${day.exercises.length} cvikov`));
+    info.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:2px'},'Môžeš ukončiť aj nedokončený tréning'));
+    partialBar.appendChild(info);
+    partialBar.appendChild(h('button',{class:'btn btn-sm',style:'background:var(--green);color:#fff',onClick:()=>{
+      if (doneEx<day.exercises.length && !confirm(`Ukončiť tréning? Máš ${doneEx}/${day.exercises.length} cvikov. Uloží sa to čo si spravil.`)) return;
+      finishWorkout(day);
+    }},'✓ Ukončiť')); 
+    container.appendChild(partialBar);
   }
 
   // Manuálne tlačidlo časovača prestávky
@@ -1279,18 +1348,20 @@ function renderExerciseCard(day, ex, idx) {
       body.appendChild(block);
     }
 
-    // RIR (voliteľné, spoločné pre cvik – jednoduchšie)
-    const rirWrap = h('div',{class:'rir-inline'});
-    rirWrap.appendChild(h('label',{},'RIR (rezerva opakovaní):'));
-    const rirSel = h('select',{onChange:(e)=>{ setExField(day.id,ex.id,'rir',e.target.value); }});
-    rirSel.appendChild(h('option',{value:''},'–'));
-    [0,1,2,3,4].forEach(r=>{
-      const opt = h('option',{value:r},String(r));
-      if (String(sess.rir)===String(r)) opt.selected=true;
-      rirSel.appendChild(opt);
-    });
-    rirWrap.appendChild(rirSel);
-    body.appendChild(rirWrap);
+    // RIR (len pre pokročilých – zapína sa v nastaveniach)
+    if (PROFILE.showRIR) {
+      const rirWrap = h('div',{class:'rir-inline'});
+      rirWrap.appendChild(h('label',{title:'Reps In Reserve – koľko opakovaní by si ešte zvládol. 2 = mohol si spraviť ešte 2.'},'RIR (rezerva):'));
+      const rirSel = h('select',{onChange:(e)=>{ setExField(day.id,ex.id,'rir',e.target.value); }});
+      rirSel.appendChild(h('option',{value:''},'–'));
+      [0,1,2,3,4].forEach(r=>{
+        const opt = h('option',{value:r},String(r));
+        if (String(sess.rir)===String(r)) opt.selected=true;
+        rirSel.appendChild(opt);
+      });
+      rirWrap.appendChild(rirSel);
+      body.appendChild(rirWrap);
+    }
 
     // Poznámka
     const noteArea = h('textarea',{class:'note-input',rows:'2',placeholder:'Poznámka k cviku...', style:'margin-top:8px', onChange:(e)=>{ setExNote(day.id,ex.id,e.target.value); }});
@@ -1332,6 +1403,8 @@ function completeSet(dayId, exId, setIdx, displayedW, displayedR) {
   const s = SESSION[dayId][exId].sets[setIdx];
 
   if (!s.done) {
+    // Zaznamenaj čas začiatku tréningu pri prvej dokončenej sérii
+    if (!SESSION[dayId]._startedAt) SESSION[dayId]._startedAt = Date.now();
     // Pri zaškrtnutí ulož predvyplnené hodnoty ak ešte nie sú zadané
     if (s.weight==null || s.weight==='') s.weight = inputToKg(displayedW);
     if (s.reps==null || s.reps==='') s.reps = String(displayedR);
@@ -1384,11 +1457,111 @@ function toggleSetDone(dayId, exId, setIdx) {
 
 function finishWorkout(day) {
   const data = SESSION[day.id] || {};
-  const entry = { id: Date.now().toString(), date: new Date().toISOString(), dayId: day.id, data: JSON.parse(JSON.stringify(data)) };
+  const startedAt = data._startedAt || null;
+
+  // Vypočítaj štatistiky tréningu
+  let totalVolume = 0;      // kg × opakovania
+  let totalSets = 0;
+  let totalReps = 0;
+  const newPRs = [];
+
+  day.exercises.forEach(ex=>{
+    const exData = data[ex.id];
+    if (!exData || !exData.sets) return;
+    const doneSets = exData.sets.filter(s=>s.done && s.weight);
+    if (!doneSets.length) return;
+    // PR pred týmto tréningom (z histórie)
+    const prevBest = getPrevBest(ex.id);
+    const prevMax = prevBest ? parseFloat(prevBest.weight) : 0;
+    let sessionMax = 0;
+    doneSets.forEach(s=>{
+      const w = parseFloat(s.weight)||0;
+      const r = parseInt(s.reps,10)||0;
+      totalVolume += w*r;
+      totalReps += r;
+      totalSets++;
+      if (w > sessionMax) sessionMax = w;
+    });
+    if (sessionMax > prevMax && prevMax > 0) {
+      newPRs.push({ name: ex.name, weight: sessionMax });
+    }
+  });
+
+  const durationMin = startedAt ? Math.max(1, Math.round((Date.now()-startedAt)/60000)) : null;
+
+  // Porovnanie s minulým rovnakým tréningom (objem)
+  let prevVolume = null;
+  for (let i=HISTORY.length-1;i>=0;i--){
+    if (HISTORY[i].dayId===day.id && HISTORY[i].stats){
+      prevVolume = HISTORY[i].stats.volume;
+      break;
+    }
+  }
+
+  const stats = { volume: Math.round(totalVolume), sets: totalSets, reps: totalReps, durationMin, prCount: newPRs.length };
+
+  // Ulož do histórie
+  const entry = { id: Date.now().toString(), date: new Date().toISOString(), dayId: day.id, data: JSON.parse(JSON.stringify(data)), stats };
   HISTORY.push(entry);
   saveHistory();
-  alert(`✅ Tréning ${day.title} uložený!`);
-  render();
+
+  // Vyčisti session pre tento deň (tréning je hotový a uložený)
+  delete SESSION[day.id];
+  saveSession();
+  stopRestTimer();
+
+  // Zobraz súhrn
+  showWorkoutSummary(day, stats, newPRs, prevVolume);
+}
+
+function showWorkoutSummary(day, stats, newPRs, prevVolume) {
+  const overlay = h('div',{class:'modal-overlay', style:'align-items:center', onClick:(e)=>{ if(e.target===overlay){ closeModal(); activeTab='training'; render(); } }});
+  const sheet = h('div',{class:'modal-sheet', style:'border-radius:20px;margin:0 16px;max-width:420px'});
+
+  sheet.appendChild(h('div',{style:'text-align:center;font-size:44px;margin-bottom:8px'},'💪'));
+  sheet.appendChild(h('h2',{style:'text-align:center;margin-bottom:4px'},'Tréning dokončený!'));
+  sheet.appendChild(h('p',{style:'text-align:center;color:var(--txtDim);font-size:13px;margin-bottom:20px'},day.title));
+
+  // Štatistické karty
+  const statsGrid = h('div',{style:'display:flex;gap:10px;margin-bottom:14px'});
+  const statItems = [
+    [stats.durationMin ? `${stats.durationMin}` : '–', stats.durationMin ? 'minút' : 'čas', '⏱'],
+    [`${stats.sets}`, 'sérií', '🔢'],
+    [`${displayWeight(stats.volume)}`, `${weightUnit()} objem`, '🏋️'],
+  ];
+  statItems.forEach(([val,label,icon])=>{
+    const card = h('div',{class:'card',style:'flex:1;text-align:center;padding:14px 8px'});
+    card.appendChild(h('div',{style:'font-size:20px;margin-bottom:4px'},icon));
+    card.appendChild(h('div',{style:'color:var(--txt);font-size:18px;font-weight:800'},val));
+    card.appendChild(h('div',{style:'color:var(--txtDim);font-size:10px;margin-top:2px'},label));
+    statsGrid.appendChild(card);
+  });
+  sheet.appendChild(statsGrid);
+
+  // Porovnanie objemu s minulým tréningom
+  if (prevVolume!=null && prevVolume>0) {
+    const diff = stats.volume - prevVolume;
+    const pct = Math.round((diff/prevVolume)*100);
+    const better = diff>=0;
+    const compCard = h('div',{class:'card',style:`margin-bottom:14px;background:${better?'var(--greenDim)':'var(--surf2)'};border-color:${better?'var(--green)':'var(--border)'}`});
+    compCard.appendChild(h('div',{style:`color:${better?'var(--green)':'var(--txtDim)'};font-size:13px;font-weight:600;text-align:center`},
+      better ? `📈 O ${pct}% väčší objem ako minule (+${displayWeight(Math.abs(diff))} ${weightUnit()})` : `Objem o ${Math.abs(pct)}% nižší ako minule`));
+    sheet.appendChild(compCard);
+  }
+
+  // Nové PR
+  if (newPRs.length) {
+    const prCard = h('div',{class:'card',style:'margin-bottom:14px;background:#F59E0B18;border-color:var(--amber)'});
+    prCard.appendChild(h('div',{style:'color:var(--amber);font-size:13px;font-weight:700;margin-bottom:6px'},`🏆 ${newPRs.length} ${newPRs.length===1?'nový rekord':'nové rekordy'}!`));
+    newPRs.forEach(pr=>{
+      prCard.appendChild(h('div',{style:'color:var(--txt);font-size:12px;margin-top:3px'},`${pr.name}: ${displayWeight(pr.weight)} ${weightUnit()}`));
+    });
+    sheet.appendChild(prCard);
+  }
+
+  sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ closeModal(); activeTab='training'; trainingSubView='history'; render(); }},'Super! 🎉'));
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
 }
 
 function findDayAnywhere(dayId) {
@@ -1669,6 +1842,7 @@ function renderTabProfile() {
     ['📏','Jednotky', PROFILE.units==='imperial'?'lbs / in':'kg / cm', ()=>openUnitsModal()],
     ['⏱','Časovač prestávky', fmtTime(PROFILE.restSeconds||90), ()=>openTimerModal()],
     ['📈','Progresívne preťaženie', progRuleLabel(), ()=>openProgressionModal()],
+    ['🎯','Pokročilé (RIR)', PROFILE.showRIR?'Zapnuté':'Vypnuté', ()=>openAdvancedModal()],
     ['🔔','Notifikácie', PROFILE.notifRest?'Zapnuté':'Vypnuté', ()=>openNotifModal()],
     ['🎁','Promo kód', PROFILE.promoCode||null, ()=>openPromoModal()],
     ['🌍','Jazyk','Slovenčina', ()=>alert('Viacjazyčnosť (SK/CZ/EN) pripravujeme v ďalšej aktualizácii.')],
@@ -1816,9 +1990,24 @@ function openProgressionModal() {
   });
 }
 
+function openAdvancedModal() {
+  settingsModal('Pokročilé nastavenia', (sheet)=>{
+    sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Pre skúsenejších cvičencov.'));
+    // RIR toggle
+    const row = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
+    const lbl = h('div',{style:'flex:1'});
+    lbl.appendChild(h('div',{class:'setting-label'},'Zobrazovať RIR'));
+    lbl.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:3px;line-height:1.4'},'RIR (Reps In Reserve) = koľko opakovaní by si ešte zvládol. Napr. RIR 2 znamená, že si mohol spraviť ešte 2 opakovania. Pomáha riadiť intenzitu.'));
+    row.appendChild(lbl);
+    const tg = h('button',{class:'toggle'+(PROFILE.showRIR?' on':''), onClick:()=>{ saveProfile({showRIR:!PROFILE.showRIR}); closeModal(); openAdvancedModal(); }});
+    tg.appendChild(h('div',{class:'toggle-knob'}));
+    row.appendChild(tg);
+    sheet.appendChild(row);
+  });
+}
+
 function openNotifModal() {
-  settingsModal('Notifikácie', (sheet)=>{
-    const supported = ('Notification' in window);
+  settingsModal('Notifikácie', (sheet)=>{    const supported = ('Notification' in window);
     if (!supported) {
       sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px'},'Tvoj prehliadač nepodporuje notifikácie. Na iPhone pridaj appku na plochu, aby fungovali.'));
       return;
@@ -2153,6 +2342,24 @@ function renderSplitEditDay() {
   scroll.appendChild(weekdayRow);
 
   scroll.appendChild(h('p',{class:'section-title'},`CVIKY (${day.exercises.length})`));
+
+  // Upozornenie na nelogické poradie + tlačidlo na auto-zoradenie
+  if (day.exercises.length>=2 && hasIllogicalOrder(day.exercises)) {
+    const warn = h('div',{class:'card',style:'background:#F59E0B18;border-color:var(--amber);margin-bottom:10px'});
+    warn.appendChild(h('div',{style:'color:var(--amber);font-size:12px;font-weight:600;line-height:1.5'},
+      '⚠️ Odporúčané poradie: zložené cviky (drep, tlaky, ťahy) na začiatok, izolácie a malé partie na koniec.'));
+    warn.appendChild(h('button',{class:'btn btn-sm',style:'margin-top:10px;background:var(--amber);color:#1a1a1a', onClick:()=>{
+      day.exercises = sortExercisesByOrder(day.exercises);
+      saveSplits(); render();
+    }},'↕ Zoradiť automaticky'));
+    scroll.appendChild(warn);
+  } else if (day.exercises.length>=2) {
+    // Poradie je OK – ponúkni tlačidlo na zoradenie aj tak (decentné)
+    scroll.appendChild(h('button',{class:'btn btn-ghost btn-sm',style:'margin-bottom:10px;width:100%', onClick:()=>{
+      day.exercises = sortExercisesByOrder(day.exercises);
+      saveSplits(); render();
+    }},'↕ Zoradiť (zložené → izolačné)'));
+  }
 
   if (!day.exercises.length) {
     const empty = h('div',{class:'card', style:'text-align:center;padding:24px'});
