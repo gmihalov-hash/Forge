@@ -888,7 +888,7 @@ function renderObResults() {
   screen.appendChild(scroll);
 
   const bottom = h('div',{class:'safe-bot',style:'padding:16px 20px'});
-  bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ saveProfile({onboardingComplete:true}); navigate('home'); }},'Pokračovať na tréning'));
+  bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ saveProfile({onboardingComplete:true}); newSplitDaysCount = (PROFILE.gender==='female'?3:3); navigate('split_new'); }},'Zostaviť môj tréning →'));
   screen.appendChild(bottom);
 
   return screen;
@@ -1949,7 +1949,7 @@ function renderSplitManage() {
 function renderSplitNew() {
   const screen = h('div', {class:'screen'});
   const top = h('div', {style:'padding:calc(var(--safeT) + 16px) var(--pad) 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
-  top.appendChild(h('button',{class:'icon-btn', onClick:()=>navigate('split_manage')},'←'));
+  top.appendChild(h('button',{class:'icon-btn', onClick:()=>{ CUSTOM_SPLITS.length ? navigate('split_manage') : (activeTab='home', navigate('home')); }},'←'));
   top.appendChild(h('h2',{},'Nový split'));
   screen.appendChild(top);
 
@@ -1983,11 +1983,15 @@ function renderSplitNew() {
 
   screen.appendChild(scroll);
 
-  const bottom = h('div',{style:'padding:16px var(--pad) calc(var(--safeB) + 16px)'});
+  const bottom = h('div',{style:'padding:16px var(--pad) calc(var(--safeB) + 16px);display:flex;flex-direction:column;gap:10px'});
   bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
     splitDraft = generateSplitFromTemplate(newSplitDaysCount, PROFILE.gender);
     navigate('split_preview');
   }},'Zobraziť návrh s cvikmi'));
+  // Preskočiť (len ak ešte nemá žiadny split – počas onboardingu)
+  if (!CUSTOM_SPLITS.length) {
+    bottom.appendChild(h('button',{class:'btn btn-ghost', onClick:()=>{ activeTab='home'; navigate('home'); }},'Preskočiť (použiť predvolený PPL)'));
+  }
   screen.appendChild(bottom);
 
   return screen;
