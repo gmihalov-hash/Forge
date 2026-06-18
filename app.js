@@ -4,12 +4,12 @@
 
 // ───────────────────────── THEMES ─────────────────────────────────────────
 const THEMES = {
-  forge:    { name:'Forge',    emoji:'🔥', dark:true,  c:{ bg:'#0A0A0A', surf:'#161616', surf2:'#1F1F1F', surf3:'#2A2A2A', txt:'#F5F5F5', txtDim:'#A0A0A0', txtFaint:'#666666', pri:'#FF6B2B', priDim:'#FF6B2B22', acc:'#FFB800', border:'#FFFFFF14', border2:'#FFFFFF22' } },
-  electric: { name:'Electric', emoji:'⚡', dark:true,  c:{ bg:'#0D0D0D', surf:'#161616', surf2:'#1F1F1F', surf3:'#2A2A2A', txt:'#F5F5F5', txtDim:'#A0A0A0', txtFaint:'#666666', pri:'#6C63FF', priDim:'#6C63FF22', acc:'#00D4FF', border:'#FFFFFF14', border2:'#FFFFFF22' } },
-  vital:    { name:'Vital',    emoji:'💚', dark:true,  c:{ bg:'#0A0A0A', surf:'#141714', surf2:'#1D211D', surf3:'#272C27', txt:'#F5F5F5', txtDim:'#A0A0A0', txtFaint:'#666666', pri:'#00E676', priDim:'#00E67622', acc:'#FFB800', border:'#FFFFFF14', border2:'#FFFFFF22' } },
-  arctic:   { name:'Arctic',   emoji:'❄️', dark:true,  c:{ bg:'#0A0E14', surf:'#131923', surf2:'#1C232F', surf3:'#262E3B', txt:'#F5F5F5', txtDim:'#A0AEC0', txtFaint:'#5A6578', pri:'#3B9EFF', priDim:'#3B9EFF22', acc:'#E8F4FF', border:'#FFFFFF14', border2:'#FFFFFF22' } },
-  steel:    { name:'Steel',    emoji:'🩶', dark:true,  c:{ bg:'#0F0F0F', surf:'#181818', surf2:'#212121', surf3:'#2B2B2B', txt:'#F5F5F5', txtDim:'#A0A0A0', txtFaint:'#666666', pri:'#9CA3AF', priDim:'#9CA3AF22', acc:'#E5E7EB', border:'#FFFFFF14', border2:'#FFFFFF22' } },
-  light:    { name:'Light',    emoji:'☀️', dark:false, c:{ bg:'#FAFAF8', surf:'#FFFFFF', surf2:'#F2F2F0', surf3:'#E8E8E5', txt:'#1A1A1A', txtDim:'#666666', txtFaint:'#999999', pri:'#FF6B2B', priDim:'#FF6B2B14', acc:'#E08E00', border:'#00000010', border2:'#00000018' } },
+  forge:    { name:'Forge',    emoji:'🔥', dark:true,  c:{ bg:'#0C0C0E', surf:'#18181C', surf2:'#222228', surf3:'#2E2E36', surf4:'#38383E', txt:'#F2F2F4', txtDim:'#8E8E9E', txtFaint:'#4A4A58', pri:'#FF4D1A', priDim:'#FF4D1A18', priMid:'#FF4D1A44', priLight:'#FF7A50', acc:'#FF9F1C', border:'#FFFFFF0C', border2:'#FFFFFF18', border3:'#FFFFFF28' } },
+  electric: { name:'Electric', emoji:'⚡', dark:true,  c:{ bg:'#0D0D12', surf:'#16161F', surf2:'#1F1F2E', surf3:'#28283A', surf4:'#323246', txt:'#F0F0FF', txtDim:'#8888AA', txtFaint:'#44445A', pri:'#7C6FFF', priDim:'#7C6FFF18', priMid:'#7C6FFF44', priLight:'#A99BFF', acc:'#00D4FF', border:'#FFFFFF0C', border2:'#FFFFFF18', border3:'#FFFFFF28' } },
+  vital:    { name:'Vital',    emoji:'💚', dark:true,  c:{ bg:'#0C0E0C', surf:'#161C16', surf2:'#1D241D', surf3:'#262E26', surf4:'#303830', txt:'#F2F5F2', txtDim:'#8EA08E', txtFaint:'#4A564A', pri:'#1DB954', priDim:'#1DB95418', priMid:'#1DB95444', priLight:'#4DD87A', acc:'#FFBE0B', border:'#FFFFFF0C', border2:'#FFFFFF18', border3:'#FFFFFF28' } },
+  arctic:   { name:'Arctic',   emoji:'❄️', dark:true,  c:{ bg:'#0A0E16', surf:'#131B26', surf2:'#1A2333', surf3:'#222D40', surf4:'#2C384E', txt:'#EEF2FF', txtDim:'#8A9EC0', txtFaint:'#4A5A78', pri:'#4A9EFF', priDim:'#4A9EFF18', priMid:'#4A9EFF44', priLight:'#7BBFFF', acc:'#64FFDA', border:'#FFFFFF0C', border2:'#FFFFFF18', border3:'#FFFFFF28' } },
+  steel:    { name:'Steel',    emoji:'🩶', dark:true,  c:{ bg:'#0E0E10', surf:'#1A1A1E', surf2:'#222226', surf3:'#2C2C32', surf4:'#36363E', txt:'#F0F0F2', txtDim:'#888898', txtFaint:'#484858', pri:'#A0A8BE', priDim:'#A0A8BE18', priMid:'#A0A8BE44', priLight:'#C4CCE0', acc:'#D4D8E8', border:'#FFFFFF0C', border2:'#FFFFFF18', border3:'#FFFFFF28' } },
+  light:    { name:'Light',    emoji:'☀️', dark:false, c:{ bg:'#F7F7F9', surf:'#FFFFFF', surf2:'#F0F0F4', surf3:'#E4E4EA', surf4:'#D8D8E0', txt:'#18181E', txtDim:'#60607A', txtFaint:'#9090A8', pri:'#FF4D1A', priDim:'#FF4D1A10', priMid:'#FF4D1A30', priLight:'#FF7A50', acc:'#E08E00', border:'#0000000A', border2:'#00000016', border3:'#00000024' } },
 };
 const THEME_KEYS = Object.keys(THEMES);
 
@@ -21,21 +21,27 @@ function applyTheme(themeKey) {
   }
   const t = THEMES[key] || THEMES.forge;
   const root = document.documentElement;
-  root.style.setProperty('--bg', t.c.bg);
-  root.style.setProperty('--surf', t.c.surf);
-  root.style.setProperty('--surf2', t.c.surf2);
-  root.style.setProperty('--surf3', t.c.surf3);
-  root.style.setProperty('--txt', t.c.txt);
-  root.style.setProperty('--txtDim', t.c.txtDim);
-  root.style.setProperty('--txtFaint', t.c.txtFaint);
-  root.style.setProperty('--pri', t.c.pri);
-  root.style.setProperty('--priDim', t.c.priDim);
-  root.style.setProperty('--acc', t.c.acc);
-  root.style.setProperty('--border', t.c.border);
-  root.style.setProperty('--border2', t.c.border2);
-  document.body.style.background = t.c.bg;
+  const c = t.c;
+  // Všetky nové tokeny
+  root.style.setProperty('--bg', c.bg);
+  root.style.setProperty('--surf', c.surf);
+  root.style.setProperty('--surf2', c.surf2);
+  root.style.setProperty('--surf3', c.surf3);
+  root.style.setProperty('--surf4', c.surf4);
+  root.style.setProperty('--txt', c.txt);
+  root.style.setProperty('--txtDim', c.txtDim);
+  root.style.setProperty('--txtFaint', c.txtFaint);
+  root.style.setProperty('--pri', c.pri);
+  root.style.setProperty('--priDim', c.priDim);
+  root.style.setProperty('--priMid', c.priMid);
+  root.style.setProperty('--priLight', c.priLight);
+  root.style.setProperty('--acc', c.acc);
+  root.style.setProperty('--border', c.border);
+  root.style.setProperty('--border2', c.border2);
+  root.style.setProperty('--border3', c.border3);
+  document.body.style.background = c.bg;
   const metaTheme = document.querySelector('meta[name=theme-color]');
-  if (metaTheme) metaTheme.setAttribute('content', t.c.bg);
+  if (metaTheme) metaTheme.setAttribute('content', c.bg);
 }
 
 // ───────────────────────── CALCULATIONS ─────────────────────────────────
@@ -964,27 +970,52 @@ function renderObResults() {
 
 // ═══════════════════════════ MAIN APP (Tab Navigation) ═════════════════
 
+// SVG ikony pre bottom nav
+const NAV_ICONS = {
+  home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+  training: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5V6a1 1 0 0 1 1-1h1.5"/><path d="M20.5 8.5V6a1 1 0 0 0-1-1H18"/><path d="M3 15.5V18a1 1 0 0 0 1 1h1.5"/><path d="M20.5 15.5V18a1 1 0 0 1-1 1H18"/></svg>`,
+  nutrition: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z"/><path d="M12 6v6l4 2"/></svg>`,
+  stats: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
+  profile: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+};
+
 function renderMainApp() {
   const screen = h('div', {class:'screen'});
 
+  // Topbar – nové logo ForgeX
   const topbar = h('div', {id:'topbar'});
   const topRow = h('div', {class:'topbar-row'});
-  const titleWrap = h('div');
-  titleWrap.appendChild(h('div', {class:'app-title'}, [h('span',{},'ForgeX')]));
-  const dateStr = (()=>{ const d=new Date(); const days=['Nedeľa','Pondelok','Utorok','Streda','Štvrtok','Piatok','Sobota']; const months=['jan','feb','mar','apr','máj','jún','júl','aug','sep','okt','nov','dec']; return `${days[d.getDay()]}, ${d.getDate()}. ${months[d.getMonth()]}`; })();
-  titleWrap.appendChild(h('div',{class:'app-sub'}, dateStr));
-  topRow.appendChild(titleWrap);
+  const logo = h('div', {class:'app-logo'});
+  logo.appendChild(h('span',{class:'app-logo-forge'},'Forge'));
+  logo.appendChild(h('span',{class:'app-logo-x'},'X'));
+  const dateEl = h('div',{});
+  logo.appendChild(dateEl);
+  const dateStr = (()=>{
+    const d=new Date();
+    const days=['Ne','Po','Ut','St','Št','Pi','So'];
+    const months=['jan','feb','mar','apr','máj','jún','júl','aug','sep','okt','nov','dec'];
+    return `${days[d.getDay()]} ${d.getDate()}. ${months[d.getMonth()]}`;
+  })();
+  const titleBlock = h('div');
+  titleBlock.appendChild(logo);
+  titleBlock.appendChild(h('div',{class:'app-date'}, dateStr));
+  topRow.appendChild(titleBlock);
   topbar.appendChild(topRow);
 
   const tabContent = h('div', {style:'flex:1;display:flex;flex-direction:column;min-height:0', id:'tab-content'});
   const tabRenderers = { home: renderTabHome, training: renderTabTraining, nutrition: renderTabNutrition, stats: renderTabStats, profile: renderTabProfile };
   tabContent.appendChild((tabRenderers[activeTab]||renderTabHome)());
 
+  // Bottom nav s SVG ikonami
   const bottomNav = h('div', {id:'bottom-nav'});
-  const tabs = [['home','🏠','Domov'],['training','🏋️','Tréning'],['nutrition','🍎','Výživa'],['stats','📊','Štatistiky'],['profile','👤','Profil']];
-  tabs.forEach(([key,icon,label])=>{
+  const TABS = [
+    ['home','Domov'],['training','Tréning'],['nutrition','Výživa'],['stats','Štatistiky'],['profile','Profil']
+  ];
+  TABS.forEach(([key,label])=>{
     const btn = h('button', {class:'bnav-btn'+(activeTab===key?' active':''), onClick:()=>{ activeTab=key; render(); }});
-    btn.appendChild(h('span',{class:'bnav-icon'},icon));
+    const iconWrap = h('div',{class:'bnav-icon'});
+    iconWrap.innerHTML = NAV_ICONS[key] || '';
+    btn.appendChild(iconWrap);
     btn.appendChild(h('span',{},label));
     bottomNav.appendChild(btn);
   });
@@ -998,96 +1029,139 @@ function renderMainApp() {
 // ───────────────────────── TAB: HOME ───────────────────────────────────
 function macroBarRow(label, value, target, unit, color) {
   const pct = target ? Math.min((value/target)*100,100) : 0;
-  const row = h('div', {class:'pbar-row'});
-  const lbl = h('div', {class:'pbar-label'});
-  lbl.appendChild(h('span',{style:'color:var(--txt);font-weight:500'},label));
-  lbl.appendChild(h('span',{style:'color:var(--txtDim)'}, `${value} / ${target??'–'} ${unit}`));
-  row.appendChild(lbl);
-  const track = h('div', {class:'pbar-track'});
-  track.appendChild(h('div', {class:'pbar-fill', style:`width:${pct}%;background:${color}`}));
+  const row = h('div', {class:'macro-row'});
+  row.appendChild(h('div',{class:'macro-dot',style:`background:${color}`}));
+  row.appendChild(h('span',{class:'macro-label'},label));
+  const track = h('div',{class:'macro-track'});
+  track.appendChild(h('div',{class:'macro-fill',style:`width:${pct}%;background:${color}`}));
   row.appendChild(track);
+  row.appendChild(h('span',{class:'macro-val'},`${value}/${target??'–'}${unit}`));
   return row;
 }
 
+// Kalorický SVG kruh
+function calRingSVG(consumed, target) {
+  const size = 80;
+  const r = 32;
+  const cx = size/2, cy = size/2;
+  const circumference = 2 * Math.PI * r;
+  const pct = target ? Math.min(consumed/target, 1) : 0;
+  const dash = pct * circumference;
+  const gap = circumference - dash;
+  // Farba: zelená ak pod cieľom, červená ak nad
+  const over = target && consumed > target;
+  return `<svg width="${size}" height="${size}" class="cal-ring-svg">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surf3)" stroke-width="6"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
+      stroke="${over?'var(--red)':'var(--pri)'}" stroke-width="6"
+      stroke-dasharray="${dash} ${gap}"
+      stroke-dashoffset="${circumference/4}"
+      stroke-linecap="round"
+      transform="rotate(-90 ${cx} ${cy})"/>
+    <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central"
+      font-size="14" font-weight="800" fill="var(--txt)" font-family="-apple-system,sans-serif"
+      letter-spacing="-0.5">${Math.round(pct*100)}%</text>
+  </svg>`;
+}
+
 function renderTabHome() {
-  const wrap = h('div', {class:'scroll'});
+  const wrap = h('div', {class:'scroll',style:'padding-top:14px'});
   const bmr = calcBMR(PROFILE);
   const tdee = calcTDEE(bmr, PROFILE.activityLevel);
   const calorieTarget = calcCalorieTarget(tdee, PROFILE.goal);
   const macros = calcMacros({ weightKg:PROFILE.weightKg, calorieTarget, goal:PROFILE.goal });
   const hydrationTarget = calcHydration(PROFILE.weightKg, PROFILE.activityLevel);
-
-  wrap.appendChild(h('h1', {}, 'Vitaj späť' + (PROFILE.name?`, ${PROFILE.name}`:'') + ' 👋'));
-
-  // Regeneračné skóre (placeholder výpočet)
-  const recCard = h('div',{class:'card',style:'display:flex;align-items:center;margin-top:18px'});
-  recCard.appendChild(h('div',{style:'width:50px;height:50px;border-radius:25px;border:3px solid var(--pri);display:flex;align-items:center;justify-content:center;flex-shrink:0'},
-    h('span',{style:'color:var(--pri);font-weight:800;font-size:16px'},'82')));
-  const recText = h('div',{style:'margin-left:14px'});
-  recText.appendChild(h('p',{style:'color:var(--txt);font-weight:700;font-size:14px'},'Regeneračné skóre'));
-  recText.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:2px'},'Pripravený na tréning. Dobrá regenerácia.'));
-  recCard.appendChild(recText);
-  wrap.appendChild(recCard);
-
-  // Dnešný tréning
-  wrap.appendChild(h('p',{class:'section-title'},'DNEŠNÝ TRÉNING'));
-  const activeSplitDay = getTodaySplitDay();
-  const hasCustomWithWeekdays = ACTIVE_SPLIT_ID && getActiveDays().some(d=>d.weekday!=null);
-  if (activeSplitDay) {
-    const tCard = h('div',{class:'card card-accent', onClick:()=>{activeDayId=activeSplitDay.id; activeTab='training'; render();}});
-    tCard.appendChild(h('p',{style:'color:var(--txt);font-weight:800;font-size:16px'},activeSplitDay.title));
-    tCard.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:4px'},activeSplitDay.subtitle));
-    wrap.appendChild(tCard);
-  } else if (hasCustomWithWeekdays) {
-    // Dnes je oddychový deň (priradené dni týždňa, dnes nič)
-    const tCard = h('div',{class:'card'});
-    tCard.appendChild(h('p',{style:'color:var(--txt);font-weight:800;font-size:16px'},'Dnes je oddychový deň 😴'));
-    tCard.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:4px'},'Podľa tvojho rozvrhu dnes nemáš naplánovaný tréning. Regenerácia je súčasť progresu.'));
-    wrap.appendChild(tCard);
-  } else {
-    const tCard = h('div',{class:'card card-accent'});
-    tCard.appendChild(h('p',{style:'color:var(--txt);font-weight:800;font-size:16px'},'Zatiaľ nemáš naplánovaný split'));
-    tCard.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:4px'},'Vytvor si vlastný tréningový plán v sekcii Tréning'));
-    wrap.appendChild(tCard);
-  }
-
-  // Makrá dnes
-  wrap.appendChild(h('p',{class:'section-title'},'MAKRÁ DNES'));
   const todayNutri = NUTRITION_LOG[todayKey()] || [];
   const consumed = todayNutri.reduce((acc,item)=>({
     cal: acc.cal+(item.calories||0), p: acc.p+(item.protein||0), c: acc.c+(item.carbs||0), f: acc.f+(item.fat||0)
   }), {cal:0,p:0,c:0,f:0});
-  const macroCard = h('div',{class:'card'});
-  macroCard.appendChild(macroBarRow('Kalórie', consumed.cal, calorieTarget, 'kcal', 'var(--pri)'));
-  macroCard.appendChild(macroBarRow('Bielkoviny', consumed.p, macros?.proteinG, 'g', 'var(--acc)'));
-  macroCard.appendChild(macroBarRow('Sacharidy', consumed.c, macros?.carbsG, 'g', '#3B9EFF'));
-  const lastRow = macroBarRow('Tuky', consumed.f, macros?.fatG, 'g', 'var(--txtDim)');
-  lastRow.style.marginBottom = '0';
-  macroCard.appendChild(lastRow);
-  wrap.appendChild(macroCard);
 
-  // Hydratácia
-  wrap.appendChild(h('p',{class:'section-title'},'HYDRATÁCIA'));
+  // Greeting
+  const greeting = h('div',{style:'margin-bottom:16px'});
+  const hour = new Date().getHours();
+  const greetWord = hour<12?'Dobré ráno':'Zdravím';
+  greeting.appendChild(h('div',{style:'color:var(--txtFaint);font-size:13px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;margin-bottom:4px'},greetWord));
+  greeting.appendChild(h('h1',{style:'margin:0'},PROFILE.name||'Forgex'));
+  wrap.appendChild(greeting);
+
+  // ── HERO: Dnešný tréning ──
+  const activeSplitDay = getTodaySplitDay();
+  const hasCustomWithWeekdays = ACTIVE_SPLIT_ID && getActiveDays().some(d=>d.weekday!=null);
+  const heroCard = h('div',{class:'hero-card',style:'margin-bottom:14px'});
+  heroCard.appendChild(h('div',{class:'hero-title'},'DNEŠNÝ TRÉNING'));
+
+  if (activeSplitDay) {
+    const exCount = activeSplitDay.exercises?.length||0;
+    const doneEx = activeSplitDay.exercises?.filter(ex=>isExDone(activeSplitDay.id,ex)).length||0;
+    heroCard.appendChild(h('div',{class:'hero-name'},activeSplitDay.title));
+    heroCard.appendChild(h('div',{class:'hero-sub'},activeSplitDay.subtitle));
+    const badge = h('div',{class:'hero-badge'});
+    badge.innerHTML = `▶ Začať&nbsp;&nbsp;·&nbsp;&nbsp;${doneEx}/${exCount} cvikov`;
+    heroCard.appendChild(badge);
+    heroCard.addEventListener('click',()=>{
+      activeDayId = activeSplitDay.id;
+      workoutModeDayId = activeSplitDay.id;
+      workoutModeExIdx = activeSplitDay.exercises?.findIndex(ex=>!isExDone(activeSplitDay.id,ex))||0;
+      navigate('workout_mode');
+    });
+  } else if (hasCustomWithWeekdays) {
+    heroCard.appendChild(h('div',{class:'hero-name'},'Oddychový deň 😴'));
+    heroCard.appendChild(h('div',{class:'hero-sub'},'Dnes nemáš naplánovaný tréning. Regenerácia je súčasť progresu.'));
+  } else {
+    heroCard.appendChild(h('div',{class:'hero-name'},'Nastav si split'));
+    heroCard.appendChild(h('div',{class:'hero-sub'},'Vytvor tréningový plán a začni sledovať progres'));
+    const badge = h('div',{class:'hero-badge'});
+    badge.textContent = '+ Vytvoriť split';
+    heroCard.appendChild(badge);
+    heroCard.addEventListener('click',()=>{ activeTab='training'; navigate('home'); });
+  }
+  wrap.appendChild(heroCard);
+
+  // ── KALÓRIE: kruh + makro bary ──
+  const calCard = h('div',{class:'card',style:'margin-bottom:14px'});
+  const calWrap = h('div',{class:'cal-ring-wrap',style:'margin-bottom:14px'});
+  const ringEl = h('div',{class:'cal-ring-svg'});
+  ringEl.innerHTML = calRingSVG(Math.round(consumed.cal), calorieTarget);
+  calWrap.appendChild(ringEl);
+
+  const calInfo = h('div',{class:'cal-ring-info'});
+  calInfo.appendChild(h('div',{class:'cal-ring-kcal'},`${Math.round(consumed.cal)}`));
+  calInfo.appendChild(h('div',{class:'cal-ring-label'},`z ${calorieTarget??'–'} kcal`));
+  const remain = calorieTarget ? calorieTarget - Math.round(consumed.cal) : null;
+  if (remain!=null) {
+    const over = remain < 0;
+    calInfo.appendChild(h('div',{class:'cal-ring-remain',style:over?'color:var(--red)':''}, over?`+${Math.abs(remain)} kcal nad cieľom`:`${remain} kcal zostáva`));
+  }
+  calWrap.appendChild(calInfo);
+  calCard.appendChild(calWrap);
+
+  // Makro bary
+  calCard.appendChild(macroBarRow('Bielkoviny',Math.round(consumed.p),macros?.proteinG,'g','var(--acc)'));
+  calCard.appendChild(macroBarRow('Sacharidy',Math.round(consumed.c),macros?.carbsG,'g','var(--blue)'));
+  calCard.appendChild(macroBarRow('Tuky',Math.round(consumed.f),macros?.fatG,'g','var(--txtDim)'));
+  wrap.appendChild(calCard);
+
+  // ── VODA + STREAK vedľa seba ──
+  const bottomRow = h('div',{style:'display:flex;gap:10px;margin-bottom:8px'});
+
   const waterToday = WATER_LOG[todayKey()] || 0;
-  const waterCard = h('div',{class:'card',style:'display:flex;align-items:center;justify-content:space-between'});
-  const waterLeft = h('div');
-  waterLeft.appendChild(h('p',{style:'color:var(--txt);font-weight:700;font-size:18px'}, `${(waterToday/1000).toFixed(2)} / ${hydrationTarget?(hydrationTarget/1000).toFixed(1):'–'} l`));
-  waterLeft.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:2px'},'Dnes vypité'));
-  waterCard.appendChild(waterLeft);
-  const waterBtn = h('button',{class:'btn btn-primary btn-sm', onClick:()=>{ WATER_LOG[todayKey()]=(WATER_LOG[todayKey()]||0)+250; saveWater(); vibrate(); render(); }},'+250ml');
-  waterCard.appendChild(waterBtn);
-  wrap.appendChild(waterCard);
+  const waterCard = h('div',{class:'card',style:'flex:1'});
+  waterCard.appendChild(h('div',{style:'color:var(--txtFaint);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px'},'VODA'));
+  waterCard.appendChild(h('div',{style:'color:var(--txt);font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.5px'},`${(waterToday/1000).toFixed(1)}l`));
+  waterCard.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-bottom:8px'},`z ${hydrationTarget?(hydrationTarget/1000).toFixed(1):'–'} l`));
+  waterCard.appendChild(h('button',{class:'btn btn-primary',style:'padding:9px 0;font-size:13px',onClick:()=>{ WATER_LOG[todayKey()]=(WATER_LOG[todayKey()]||0)+250; saveWater(); vibrate(); render(); }},'+250ml'));
+  bottomRow.appendChild(waterCard);
 
-  // Streak
-  wrap.appendChild(h('p',{class:'section-title'},'STREAK'));
   const streak = computeStreak();
-  const streakCard = h('div',{class:'card',style:'display:flex;align-items:center;justify-content:space-between'});
-  const streakLeft = h('div');
-  streakLeft.appendChild(h('p',{style:'color:var(--txt);font-weight:700;font-size:18px'}, `${streak} ${streak===1?'deň':'dní'}`));
-  streakLeft.appendChild(h('p',{style:'color:var(--txtDim);font-size:12px;margin-top:2px'}, streak>0?'Pokračuj!':'Začni svoj prvý tréning'));
-  streakCard.appendChild(streakLeft);
-  streakCard.appendChild(h('span',{style:'font-size:28px'},'🔥'));
-  wrap.appendChild(streakCard);
+  const streakCard = h('div',{class:'card',style:'flex:1;display:flex;flex-direction:column;justify-content:space-between'});
+  streakCard.appendChild(h('div',{style:'color:var(--txtFaint);font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px'},'SÉRIA'));
+  const streakNum = h('div',{style:'display:flex;align-items:baseline;gap:6px'});
+  streakNum.appendChild(h('span',{style:'color:var(--txt);font-size:32px;font-weight:800;letter-spacing:-2px;font-variant-numeric:tabular-nums'},String(streak)));
+  streakNum.appendChild(h('span',{style:'color:var(--txtFaint);font-size:12px'},'dní'));
+  streakCard.appendChild(streakNum);
+  streakCard.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:4px'},streak>0?'Pokračuj 💪':'Začni dnes'));
+  bottomRow.appendChild(streakCard);
+  wrap.appendChild(bottomRow);
 
   return wrap;
 }
