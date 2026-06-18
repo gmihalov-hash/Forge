@@ -637,13 +637,21 @@ let expandedEx = {};
 let lastAutoExpandedDay = null; // sleduje pre ktorý deň už prebehlo auto-rozbalenie
 
 function navigate(route) {
+  // Pri zmene obrazovky chceme scroll hore – vynuluj predošlý scroller pred renderom
+  const prevScroller = document.getElementById('root')?.querySelector('.scroll');
+  if (prevScroller) prevScroller.scrollTop = 0;
   currentRoute = route;
   render();
-  document.getElementById('root').scrollTop = 0;
+  const newScroller = document.getElementById('root')?.querySelector('.scroll');
+  if (newScroller) newScroller.scrollTop = 0;
 }
 
 function render() {
   const root = document.getElementById('root');
+  // Zapamätaj si scroll pozíciu aktuálnej skrolovacej plochy (aby obraz neskákal hore)
+  const prevScroller = root.querySelector('.scroll');
+  const prevScrollTop = prevScroller ? prevScroller.scrollTop : 0;
+
   root.innerHTML = '';
   applyTheme(PROFILE.theme || 'auto');
 
@@ -668,6 +676,12 @@ function render() {
   };
   const fn = routes[currentRoute] || renderMainApp;
   root.appendChild(fn());
+
+  // Obnov scroll pozíciu (ak existuje skrolovacia plocha a mali sme kam scrollnuté)
+  if (prevScrollTop > 0) {
+    const newScroller = root.querySelector('.scroll');
+    if (newScroller) newScroller.scrollTop = prevScrollTop;
+  }
 
   // Ak beží časovač prestávky, znovu ho zobraz (re-render zmazal #root, nie body)
   if (restTimerInterval && restTimerRemaining>0 && !document.getElementById('rest-timer')) {
@@ -1318,11 +1332,12 @@ function renderExerciseCard(day, ex, idx) {
       wStepper.appendChild(h('div',{class:'stepper-label'}, `Váha (${weightUnit()})`));
       const wRow = h('div',{class:'stepper-row'});
       const wStep = progStepForMuscle(ex.muscle);
-      wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',-wStep,wVal,rVal)},'−'));
+      wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',-wStep)},'−'));
       const wInput = h('input',{class:'stepper-val',type:'number',inputmode:'decimal',value:wVal,placeholder:'0',
+        id:`w-${ex.id}-${si}`,
         onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight', inputToKg(e.target.value)); }});
       wRow.appendChild(wInput);
-      wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',wStep,wVal,rVal)},'+'));
+      wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',wStep)},'+'));
       wStepper.appendChild(wRow);
       fields.appendChild(wStepper);
 
@@ -1330,17 +1345,21 @@ function renderExerciseCard(day, ex, idx) {
       const rStepper = h('div',{class:'stepper'});
       rStepper.appendChild(h('div',{class:'stepper-label'}, 'Opakovania'));
       const rRow = h('div',{class:'stepper-row'});
-      rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',-1,wVal,rVal)},'−'));
+      rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',-1)},'−'));
       const rInput = h('input',{class:'stepper-val',type:'number',inputmode:'numeric',value:rVal,placeholder:'0',
+        id:`r-${ex.id}-${si}`,
         onChange:(e)=>{ setSetVal(day.id,ex.id,si,'reps', e.target.value); }});
       rRow.appendChild(rInput);
-      rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',1,wVal,rVal)},'+'));
+      rRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'reps',1)},'+'));
       rStepper.appendChild(rRow);
       fields.appendChild(rStepper);
 
       // Veľký check button
       const checkBtn = h('button',{class:'set-check-lg'+(isDone?' done':''), onClick:()=>{
-        completeSet(day.id, ex.id, si, wVal, rVal);
+        // Načítaj aktuálne hodnoty z inputov (môžu byť upravené stepperom bez re-renderu)
+        const curW = document.getElementById(`w-${ex.id}-${si}`)?.value || wVal;
+        const curR = document.getElementById(`r-${ex.id}-${si}`)?.value || rVal;
+        completeSet(day.id, ex.id, si, curW, curR);
       }},'✓');
       fields.appendChild(checkBtn);
 
@@ -1375,23 +1394,22 @@ function renderExerciseCard(day, ex, idx) {
 }
 
 // Stepper +/- úprava – ak ešte nie je hodnota uložená, použije zobrazenú (predvyplnenú)
-function adjustSetField(dayId, exId, setIdx, field, delta, currentW, currentR) {
-  const sess = (SESSION[dayId]||{})[exId] || {};
-  const s = (sess.sets||[])[setIdx] || {};
-  let current;
-  if (field==='weight') {
-    current = s.weight!=null && s.weight!=='' ? parseFloat(displayWeight(parseFloat(s.weight))) : (parseFloat(currentW)||0);
-  } else {
-    current = s.reps!=null && s.reps!=='' ? parseInt(s.reps,10) : (parseInt(currentR,10)||0);
-  }
+function adjustSetField(dayId, exId, setIdx, field, delta) {
+  const inputId = (field==='weight'?'w-':'r-') + exId + '-' + setIdx;
+  const input = document.getElementById(inputId);
+  const current = parseFloat(input?.value) || 0;
   let next = current + delta;
   if (next < 0) next = 0;
+  // Zaokrúhli váhu na 1 desatinné miesto (kvôli 2.5 krokom)
+  if (field==='weight') next = Math.round(next*10)/10;
+  // Aktualizuj input priamo (bez re-renderu => obraz neskáče)
+  if (input) input.value = next;
+  // Ulož do session (váhu konvertuj späť na kg)
   if (field==='weight') {
     setSetVal(dayId, exId, setIdx, 'weight', inputToKg(next));
   } else {
     setSetVal(dayId, exId, setIdx, 'reps', String(next));
   }
-  render();
 }
 
 // Dokončenie série – uloží hodnoty (ak nie sú), zazelení, spustí timer, auto-skok
