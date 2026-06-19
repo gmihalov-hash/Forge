@@ -73,6 +73,27 @@ button{font-family:inherit;cursor:pointer}
 @media (max-width:374px){ :root{ --pad:14px; } h1{font-size:22px} h2{font-size:19px} }
 @media (min-width:430px){ :root{ --pad:22px; } }
 
+/* ═══ LANDSCAPE MÓD ═══ */
+/* Aktivuje sa keď je telefón otočený nabok (šírka > výška, a dostatočne široký) */
+@media (orientation:landscape) and (min-width:560px){
+  :root{ --pad:28px; }
+  /* Obsah sa necentruje na celú šírku, ale zostáva čitateľný (max-width) s bočnými okrajmi */
+  .scroll{ max-width:900px; margin:0 auto; width:100%; }
+  /* Hlavný obsah na Home/Štatistikách/Výžive sa rozloží do 2 stĺpcov */
+  .landscape-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
+  .landscape-grid > *{ margin-bottom:0 !important; }
+  /* Bottom nav v landscape - užší, nezaberá toľko vertikálneho priestoru */
+  #bottom-nav{ padding-top:4px; }
+  .bnav-icon{ font-size:18px; }
+  /* Topbar mierne nižší */
+  #topbar{ padding-top:calc(var(--safeT) + 8px); padding-bottom:8px; }
+}
+/* Pri veľmi nízkej výške (landscape na malom telefóne) skrátime safe-top odstupy */
+@media (orientation:landscape) and (max-height:430px){
+  .safe-top{ padding-top:calc(var(--safeT) + 8px); }
+  .safe-bot{ padding-bottom:calc(var(--safeB) + 8px); }
+}
+
 /* ═══ LAYOUT ═══ */
 #root{padding-left:var(--safeL);padding-right:var(--safeR)}
 .screen{flex:1;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;min-height:0}

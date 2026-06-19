@@ -242,9 +242,18 @@ const DEFAULT_PROFILE = {
   progStepLower:5,           // krok váhy pre nohy (kg)
   progRule:'all_sets',       // 'all_sets' | 'any_set' | 'aggressive' | 'off'
   showRIR:false,             // zobrazovať RIR pole (pre pokročilých); default skryté
+  // ── Home layout (vlastné usporiadanie sekcií) ──
+  homeLayout: ['hero','calories','water_streak'], // poradie sekcií; ak chýba sekcia v zozname = vypnutá
+};
+const HOME_SECTIONS_META = {
+  hero:        { label:'Dnešný tréning', icon:'🏋️', removable:false },
+  calories:    { label:'Kalórie a makrá', icon:'🔥', removable:true },
+  water_streak:{ label:'Voda a séria', icon:'💧', removable:true },
 };
 let PROFILE = { ...DEFAULT_PROFILE, ...(DB.get('profile')||{}) };
 function saveProfile(patch){ PROFILE = { ...PROFILE, ...patch }; DB.set('profile', PROFILE); }
+// Zaisti, že homeLayout je vždy platné pole (ochrana pred starými profilmi z localStorage)
+if (!Array.isArray(PROFILE.homeLayout)) PROFILE.homeLayout = [...DEFAULT_PROFILE.homeLayout];
 
 let SESSION = DB.get('session') || {};      // aktívny rozpísaný tréning, klúč = day.id
 function saveSession(){ DB.set('session', SESSION); }
@@ -687,6 +696,7 @@ function render() {
     split_preview: renderSplitPreview,
     split_edit_day: renderSplitEditDay,
     workout_mode: renderWorkoutMode,
+    home_customize: renderHomeCustomize,
   };
   const fn = routes[currentRoute] || renderMainApp;
   root.appendChild(fn());
@@ -760,9 +770,12 @@ function inputField(labelText, value, placeholder, unit, onChange, type='decimal
   return wrap;
 }
 
-function obScreen(stepIndex, title, sub, contentBuilder, onNext, nextDisabled, extraBottom) {
+function obScreen(stepIndex, title, sub, contentBuilder, onNext, nextDisabled, extraBottom, prevRoute) {
   const screen = h('div', {class:'screen'});
-  const top = h('div', {class:'safe-top'});
+  const top = h('div', {class:'safe-top', style:'position:relative'});
+  if (prevRoute) {
+    top.appendChild(h('button',{class:'icon-btn', style:'position:absolute;left:20px;top:calc(var(--safeT) + 12px);z-index:2', onClick:()=>navigate(prevRoute)},'←'));
+  }
   top.appendChild(progressDots(7, stepIndex));
   screen.appendChild(top);
 
@@ -789,7 +802,8 @@ function renderObGender() {
   return obScreen(0, 'Aké je tvoje pohlavie?', 'Potrebné pre presný výpočet BMR a makronutrientov', (content)=>{
     content.appendChild(obSelectCard('Muž', null, '♂️', PROFILE.gender==='male', ()=>{ saveProfile({gender:'male'}); render(); }));
     content.appendChild(obSelectCard('Žena', null, '♀️', PROFILE.gender==='female', ()=>{ saveProfile({gender:'female'}); render(); }));
-  }, ()=>navigate('ob_basics'), !valid);
+    if (!valid) content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:12px;text-align:center;margin-top:14px'},'👆 Vyber jednu možnosť pre pokračovanie'));
+  }, ()=>navigate('ob_basics'), !valid, null, 'welcome');
 }
 
 function renderObBasics() {
@@ -804,24 +818,33 @@ function renderObBasics() {
     const ageVal = inputs[1].value;
     const hVal = inputs[2].value;
     const wVal = inputs[3].value;
+    // Validácia rozsahov (bod 3 - validácia čísel)
+    const age = parseInt(ageVal,10), height = parseFloat(hVal), weight = parseFloat(wVal);
     if (!ageVal || !hVal || !wVal) return;
-    saveProfile({ name: nameVal||'', age: parseInt(ageVal,10), heightCm: parseFloat(hVal), weightKg: parseFloat(wVal) });
+    if (age < 10 || age > 100) { alert('Zadaj vek medzi 10 a 100 rokmi.'); return; }
+    if (height < 100 || height > 250) { alert('Zadaj výšku medzi 100 a 250 cm.'); return; }
+    if (weight < 30 || weight > 300) { alert('Zadaj hmotnosť medzi 30 a 300 kg.'); return; }
+    saveProfile({ name: nameVal||'', age, heightCm: height, weightKg: weight });
     navigate('ob_bodyfat');
-  }, false);
+  }, false, null, 'ob_gender');
 }
 
-let obBfMode = 'skip';
+let obBfMode = null; // null = nič nevybraté (predtým 'skip' čo pôsobilo ako aktívna voľba)
 function renderObBodyFat() {
   let waist='', neck='', hip='', manualBf='';
   return obScreen(2, 'Telesný tuk', 'Voliteľné, ale zlepší presnosť odporúčaní', (content)=>{
     const modeRow = h('div', {style:'display:flex;gap:8px;margin-bottom:20px'});
-    const modes = [['manual','Poznám %'],['navy','Vypočítaj'],['skip','Preskočiť']];
+    const modes = [['manual','Poznám %'],['navy','Vypočítaj z obvodov']];
     modes.forEach(([key,label])=>{
       const btn = h('button', {class:'btn '+(obBfMode===key?'btn-primary':'btn-outline')+' btn-sm', style:'flex:1', onClick:()=>{obBfMode=key; render();}}, label);
       modeRow.appendChild(btn);
     });
     content.appendChild(modeRow);
 
+    if (!obBfMode) {
+      content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:20px 0'},
+        'Vyber jednu z možností hore, alebo preskoč a doplň neskôr v Profile.'));
+    }
     if (obBfMode==='manual') {
       content.appendChild(inputField('Telesný tuk', '', 'napr. 18', '%', v=>manualBf=v));
     }
@@ -861,7 +884,7 @@ function renderObBodyFat() {
     }
     saveProfile({ bodyFatPct: bf });
     navigate('ob_measurements');
-  }, false);
+  }, false, h('button',{class:'btn btn-ghost', onClick:()=>{ saveProfile({bodyFatPct:null}); navigate('ob_measurements'); }},'Preskočiť'), 'ob_basics');
 }
 
 function renderObMeasurements() {
@@ -881,7 +904,7 @@ function renderObMeasurements() {
       bicepCm: inputs[4].value?parseFloat(inputs[4].value):null,
     });
     navigate('ob_goal');
-  }, false, h('button',{class:'btn btn-ghost', onClick:()=>navigate('ob_goal')},'Preskočiť'));
+  }, false, h('button',{class:'btn btn-ghost', onClick:()=>navigate('ob_goal')},'Preskočiť'), 'ob_bodyfat');
 }
 
 function renderObGoal() {
@@ -894,7 +917,8 @@ function renderObGoal() {
   const valid = !!PROFILE.goal;
   return obScreen(4, 'Aký je tvoj cieľ?', 'Toto určí tvoje kalorické a makro odporúčania', (content)=>{
     GOALS.forEach(g=>content.appendChild(obSelectCard(g.label,g.sub,g.emoji,PROFILE.goal===g.key,()=>{saveProfile({goal:g.key}); render();})));
-  }, ()=>navigate('ob_activity'), !valid);
+    if (!valid) content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:12px;text-align:center;margin-top:14px'},'👆 Vyber jednu možnosť pre pokračovanie'));
+  }, ()=>navigate('ob_activity'), !valid, null, 'ob_measurements');
 }
 
 function renderObActivity() {
@@ -904,7 +928,8 @@ function renderObActivity() {
   const valid = !!PROFILE.activityLevel;
   return obScreen(5, 'Úroveň aktivity', 'Mimo tréningu – tvoja bežná denná aktivita', (content)=>{
     LEVELS.forEach(([key,emoji])=>content.appendChild(obSelectCard(ACTIVITY_LABELS[key],null,emoji,PROFILE.activityLevel===key,()=>{saveProfile({activityLevel:key}); render();})));
-  }, ()=>navigate('ob_results'), !valid);
+    if (!valid) content.appendChild(h('p',{style:'color:var(--txtFaint);font-size:12px;text-align:center;margin-top:14px'},'👆 Vyber jednu možnosť pre pokračovanie'));
+  }, ()=>navigate('ob_results'), !valid, null, 'ob_goal');
 }
 
 function renderObResults() {
@@ -1066,17 +1091,8 @@ function calRingSVG(consumed, target) {
 
 function renderTabHome() {
   const wrap = h('div', {class:'scroll',style:'padding-top:14px'});
-  const bmr = calcBMR(PROFILE);
-  const tdee = calcTDEE(bmr, PROFILE.activityLevel);
-  const calorieTarget = calcCalorieTarget(tdee, PROFILE.goal);
-  const macros = calcMacros({ weightKg:PROFILE.weightKg, calorieTarget, goal:PROFILE.goal });
-  const hydrationTarget = calcHydration(PROFILE.weightKg, PROFILE.activityLevel);
-  const todayNutri = NUTRITION_LOG[todayKey()] || [];
-  const consumed = todayNutri.reduce((acc,item)=>({
-    cal: acc.cal+(item.calories||0), p: acc.p+(item.protein||0), c: acc.c+(item.carbs||0), f: acc.f+(item.fat||0)
-  }), {cal:0,p:0,c:0,f:0});
 
-  // Greeting
+  // Greeting (vždy hore, nie je súčasť konfigurovateľných sekcií)
   const greeting = h('div',{style:'margin-bottom:16px'});
   const hour = new Date().getHours();
   const greetWord = hour<12?'Dobré ráno':'Zdravím';
@@ -1084,7 +1100,29 @@ function renderTabHome() {
   greeting.appendChild(h('h1',{style:'margin:0'},PROFILE.name||'Forgex'));
   wrap.appendChild(greeting);
 
-  // ── HERO: Dnešný tréning ──
+  // Vykresli sekcie v poradí podľa homeLayout (chýbajúca sekcia = vypnutá)
+  const layout = PROFILE.homeLayout && PROFILE.homeLayout.length ? PROFILE.homeLayout : DEFAULT_PROFILE.homeLayout;
+  const renderers = { hero: renderHomeSectionHero, calories: renderHomeSectionCalories, water_streak: renderHomeSectionWaterStreak };
+  // Hero ide vždy samostatne (full width), zvyšok sekcií sa v landscape zobrazí v 2-stĺpcovej mriežke
+  const heroKey = layout.find(k=>k==='hero');
+  const restKeys = layout.filter(k=>k!=='hero');
+  if (heroKey && renderers[heroKey]) wrap.appendChild(renderers[heroKey]());
+  if (restKeys.length) {
+    const grid = h('div',{class:'landscape-grid',style:'margin-bottom:8px'});
+    restKeys.forEach(key=>{
+      const fn = renderers[key];
+      if (fn) grid.appendChild(fn());
+    });
+    wrap.appendChild(grid);
+  }
+
+  // Tlačidlo na úpravu rozloženia – decentné, na konci
+  wrap.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:4px;font-size:12px', onClick:()=>navigate('home_customize')},'⚙ Upraviť domovskú obrazovku'));
+
+  return wrap;
+}
+
+function renderHomeSectionHero() {
   const activeSplitDay = getTodaySplitDay();
   const hasCustomWithWeekdays = ACTIVE_SPLIT_ID && getActiveDays().some(d=>d.weekday!=null);
   const heroCard = h('div',{class:'hero-card',style:'margin-bottom:14px'});
@@ -1115,9 +1153,19 @@ function renderTabHome() {
     heroCard.appendChild(badge);
     heroCard.addEventListener('click',()=>{ activeTab='training'; navigate('home'); });
   }
-  wrap.appendChild(heroCard);
+  return heroCard;
+}
 
-  // ── KALÓRIE: kruh + makro bary ──
+function renderHomeSectionCalories() {
+  const bmr = calcBMR(PROFILE);
+  const tdee = calcTDEE(bmr, PROFILE.activityLevel);
+  const calorieTarget = calcCalorieTarget(tdee, PROFILE.goal);
+  const macros = calcMacros({ weightKg:PROFILE.weightKg, calorieTarget, goal:PROFILE.goal });
+  const todayNutri = NUTRITION_LOG[todayKey()] || [];
+  const consumed = todayNutri.reduce((acc,item)=>({
+    cal: acc.cal+(item.calories||0), p: acc.p+(item.protein||0), c: acc.c+(item.carbs||0), f: acc.f+(item.fat||0)
+  }), {cal:0,p:0,c:0,f:0});
+
   const calCard = h('div',{class:'card',style:'margin-bottom:14px'});
   const calWrap = h('div',{class:'cal-ring-wrap',style:'margin-bottom:14px'});
   const ringEl = h('div',{class:'cal-ring-svg'});
@@ -1135,13 +1183,14 @@ function renderTabHome() {
   calWrap.appendChild(calInfo);
   calCard.appendChild(calWrap);
 
-  // Makro bary
   calCard.appendChild(macroBarRow('Bielkoviny',Math.round(consumed.p),macros?.proteinG,'g','var(--acc)'));
   calCard.appendChild(macroBarRow('Sacharidy',Math.round(consumed.c),macros?.carbsG,'g','var(--blue)'));
   calCard.appendChild(macroBarRow('Tuky',Math.round(consumed.f),macros?.fatG,'g','var(--txtDim)'));
-  wrap.appendChild(calCard);
+  return calCard;
+}
 
-  // ── VODA + STREAK vedľa seba ──
+function renderHomeSectionWaterStreak() {
+  const hydrationTarget = calcHydration(PROFILE.weightKg, PROFILE.activityLevel);
   const bottomRow = h('div',{style:'display:flex;gap:10px;margin-bottom:8px'});
 
   const waterToday = WATER_LOG[todayKey()] || 0;
@@ -1161,9 +1210,8 @@ function renderTabHome() {
   streakCard.appendChild(streakNum);
   streakCard.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:4px'},streak>0?'Pokračuj 💪':'Začni dnes'));
   bottomRow.appendChild(streakCard);
-  wrap.appendChild(bottomRow);
 
-  return wrap;
+  return bottomRow;
 }
 
 function getTodaySplitDay() {
@@ -3033,6 +3081,100 @@ function backToTraining() {
 // ═══════════════════════════ WORKOUT MÓD ═══════════════════════════════
 let workoutModeDayId = null;
 let workoutModeExIdx = 0;
+
+// ═══════════════════════════ HOME CUSTOMIZE ═════════════════════════════
+function renderHomeCustomize() {
+  const screen = h('div',{class:'screen'});
+  const top = h('div',{style:'padding:calc(var(--safeT) + 16px) var(--pad) 16px;display:flex;align-items:center;gap:12px;border-bottom:0.5px solid var(--border)'});
+  top.appendChild(h('button',{class:'icon-btn', onClick:()=>{ activeTab='home'; navigate('home'); }},'←'));
+  top.appendChild(h('h2',{},'Domovská obrazovka'));
+  screen.appendChild(top);
+
+  const scroll = h('div',{class:'scroll'});
+  scroll.appendChild(h('p',{class:'subtitle',style:'margin-bottom:16px'},'Zapni, vypni alebo presuň sekcie. "Dnešný tréning" je vždy zapnutý.'));
+
+  // Aktívne sekcie (v poradí) + neaktívne (na konci, sivé)
+  const layout = [...(PROFILE.homeLayout && PROFILE.homeLayout.length ? PROFILE.homeLayout : DEFAULT_PROFILE.homeLayout)];
+  const allKeys = Object.keys(HOME_SECTIONS_META);
+  const inactiveKeys = allKeys.filter(k=>!layout.includes(k));
+
+  scroll.appendChild(h('p',{class:'section-title'},'ZAPNUTÉ SEKCIE (poradie zhora nadol)'));
+  const activeList = h('div',{id:'home-active-list'});
+  scroll.appendChild(activeList);
+
+  scroll.appendChild(h('p',{class:'section-title'},'VYPNUTÉ'));
+  const inactiveList = h('div',{id:'home-inactive-list'});
+  scroll.appendChild(inactiveList);
+
+  function renderLists() {
+    activeList.innerHTML=''; inactiveList.innerHTML='';
+    layout.forEach((key,idx)=>{
+      const meta = HOME_SECTIONS_META[key];
+      if (!meta) return;
+      const row = h('div',{class:'ex-card', style:'margin-bottom:8px'});
+      const inner = h('div',{style:'display:flex;align-items:center;gap:10px;padding:12px 14px'});
+      inner.appendChild(h('div',{style:'font-size:18px'},meta.icon));
+      inner.appendChild(h('div',{style:'flex:1;color:var(--txt);font-weight:600;font-size:14px'},meta.label));
+      if (idx>0) {
+        inner.appendChild(h('button',{class:'btn btn-ghost btn-sm', style:'padding:6px 9px', onClick:()=>{
+          [layout[idx-1],layout[idx]]=[layout[idx],layout[idx-1]];
+          saveProfile({homeLayout:[...layout]}); renderLists();
+        }},'↑'));
+      }
+      if (idx<layout.length-1) {
+        inner.appendChild(h('button',{class:'btn btn-ghost btn-sm', style:'padding:6px 9px', onClick:()=>{
+          [layout[idx+1],layout[idx]]=[layout[idx],layout[idx+1]];
+          saveProfile({homeLayout:[...layout]}); renderLists();
+        }},'↓'));
+      }
+      if (meta.removable) {
+        inner.appendChild(h('button',{class:'btn btn-ghost btn-sm', style:'padding:6px 9px;color:var(--red)', onClick:()=>{
+          layout.splice(idx,1);
+          saveProfile({homeLayout:[...layout]}); renderLists();
+        }},'✕'));
+      } else {
+        inner.appendChild(h('span',{style:'color:var(--txtFaint);font-size:10px;padding:0 4px'},'vždy zapnuté'));
+      }
+      row.appendChild(inner);
+      activeList.appendChild(row);
+    });
+
+    const currentInactive = allKeys.filter(k=>!layout.includes(k));
+    if (!currentInactive.length) {
+      inactiveList.appendChild(h('p',{style:'color:var(--txtFaint);font-size:13px;text-align:center;padding:16px'},'Všetky sekcie sú zapnuté'));
+    }
+    currentInactive.forEach(key=>{
+      const meta = HOME_SECTIONS_META[key];
+      const row = h('div',{class:'ex-card', style:'margin-bottom:8px;opacity:.55'});
+      const inner = h('div',{style:'display:flex;align-items:center;gap:10px;padding:12px 14px'});
+      inner.appendChild(h('div',{style:'font-size:18px'},meta.icon));
+      inner.appendChild(h('div',{style:'flex:1;color:var(--txtDim);font-weight:600;font-size:14px'},meta.label));
+      inner.appendChild(h('button',{class:'btn btn-outline btn-sm', onClick:()=>{
+        layout.push(key);
+        saveProfile({homeLayout:[...layout]}); renderLists();
+      }},'+ Zapnúť'));
+      row.appendChild(inner);
+      inactiveList.appendChild(row);
+    });
+  }
+  renderLists();
+
+  // Reset na predvolené
+  scroll.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:8px', onClick:()=>{
+    saveProfile({homeLayout:[...DEFAULT_PROFILE.homeLayout]});
+    layout.length=0; layout.push(...DEFAULT_PROFILE.homeLayout);
+    renderLists();
+    showToast('✓ Obnovené predvolené');
+  }},'Obnoviť predvolené poradie'));
+
+  screen.appendChild(scroll);
+
+  const bottom = h('div',{style:'padding:16px var(--pad) calc(var(--safeB) + 16px)'});
+  bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ activeTab='home'; navigate('home'); }},'Hotovo'));
+  screen.appendChild(bottom);
+
+  return screen;
+}
 
 function renderWorkoutMode() {
   const days = getActiveDays();
