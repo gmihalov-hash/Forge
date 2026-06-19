@@ -3654,19 +3654,20 @@ if ('serviceWorker' in navigator) {
 function spawnSparks() {
   const wrap = document.querySelector('.splash-logo-wrap');
   if (!wrap) return;
-  for (let i=0;i<14;i++) {
+  for (let i=0;i<20;i++) {
     const spark = document.createElement('div');
     spark.className = 'splash-spark';
     const size = 2 + Math.random()*3;
     const angle = Math.random()*Math.PI*2;
-    const dist = 50 + Math.random()*70;
+    const dist = 50 + Math.random()*80;
     spark.style.width = size+'px';
     spark.style.height = size+'px';
     spark.style.left = '50%';
     spark.style.top = '50%';
     spark.style.setProperty('--sx', Math.cos(angle)*dist+'px');
     spark.style.setProperty('--sy', Math.sin(angle)*dist+'px');
-    spark.style.animation = `sparkFly ${0.6+Math.random()*0.5}s ease-out ${0.3+Math.random()*0.3}s forwards`;
+    const delay = 0.4 + Math.random()*1.1; // rozložené na dlhší úsek
+    spark.style.animation = `sparkFly ${0.7+Math.random()*0.6}s ease-out ${delay}s forwards`;
     wrap.appendChild(spark);
   }
 }
@@ -3675,8 +3676,9 @@ function initApp() {
   // Appka sa vykresľuje "pod" splash screenom, takže keď splash zmizne, je hneď pripravená
   render();
   spawnSparks();
+  setTimeout(()=>{ if (document.getElementById('splash')) spawnSparks(); }, 1400); // druhá vlna iskier
   const splash = document.getElementById('splash');
-  const SPLASH_DURATION = 1500; // ms – celkový čas zobrazenia splash screenu
+  const SPLASH_DURATION = 2500; // ms – celkový čas zobrazenia splash screenu
   setTimeout(()=>{
     if (!splash) return;
     splash.classList.add('fade-out');
