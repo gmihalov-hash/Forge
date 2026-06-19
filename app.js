@@ -2233,40 +2233,110 @@ let barcodeReader=null;
 
 function startBarcodeScan() {
   document.querySelectorAll('.food-picker-overlay').forEach(o=>o.remove());
-  const overlay=h('div',{class:'modal-overlay',style:'z-index:320;align-items:flex-end',onClick:(e)=>{ if(e.target===overlay){ if(barcodeReader){try{barcodeReader.reset();}catch(e){} barcodeReader=null;} overlay.remove(); renderFoodPicker(); } }});
+
+  function stopScan() {
+    if (barcodeReader) { try{ barcodeReader.reset(); }catch(e){} barcodeReader=null; }
+    // Zastav video stream
+    const v = document.getElementById('scan-video');
+    if (v && v.srcObject) { v.srcObject.getTracks().forEach(t=>t.stop()); v.srcObject=null; }
+  }
+
+  const overlay=h('div',{class:'modal-overlay',style:'z-index:320;align-items:flex-end',
+    onClick:(e)=>{ if(e.target===overlay){ stopScan(); overlay.remove(); renderFoodPicker(); } }});
   const sheet=h('div',{style:'background:var(--surf);border-radius:20px 20px 0 0;width:100%;padding:20px 20px calc(var(--safeB)+20px)'});
   sheet.appendChild(h('div',{class:'modal-handle'}));
   sheet.appendChild(h('h2',{style:'margin-bottom:6px'},'Skenovanie EAN'));
   sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:12px'},'Zadaj kód zo škatule, alebo naskenovaj kamerou.'));
 
-  // Manuálne – primárne
+  // Manuálne – primárne (vždy funguje)
   const mr=h('div',{style:'display:flex;gap:8px;margin-bottom:16px'});
   const mw=h('div',{class:'input-wrap',style:'flex:1;margin-bottom:0'});
   const mi=h('input',{type:'number',inputmode:'numeric',placeholder:'EAN kód (8–13 číslic)',id:'ean-input'});
   mw.appendChild(mi); mr.appendChild(mw);
-  mr.appendChild(h('button',{class:'btn btn-primary btn-sm',onClick:()=>{ const ean=(document.getElementById('ean-input')?.value||'').trim(); if(!ean){alert('Zadaj kód.');return;} overlay.remove(); lookupBarcode(ean); }},'Hľadať'));
+  mr.appendChild(h('button',{class:'btn btn-primary btn-sm',onClick:()=>{
+    const ean=(document.getElementById('ean-input')?.value||'').trim();
+    if(!ean){alert('Zadaj kód.');return;}
+    stopScan(); overlay.remove(); lookupBarcode(ean);
+  }},'Hľadať'));
   sheet.appendChild(mr);
 
-  // Kamera – ak ZXing dostupný a https
-  if(typeof ZXing!=='undefined') {
-    sheet.appendChild(h('p',{class:'section-title'},'KAMERA'));
-    const vw=h('div',{style:'position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;margin-bottom:8px'});
-    const video=h('video',{id:'scan-video',style:'width:100%;height:100%;object-fit:cover'});
-    video.setAttribute('playsinline','true'); video.setAttribute('muted','true');
-    vw.appendChild(video);
-    vw.appendChild(h('div',{style:'position:absolute;top:50%;left:10%;right:10%;height:2px;background:var(--pri);box-shadow:0 0 10px var(--pri);transform:translateY(-50%)'}));
-    sheet.appendChild(vw);
-    sheet.appendChild(h('p',{id:'scan-status',style:'color:var(--txtDim);font-size:12px;text-align:center;margin-bottom:10px'},'Spúšťam kameru...'));
-    try {
-      barcodeReader=new ZXing.BrowserMultiFormatReader();
-      barcodeReader.decodeFromVideoDevice(null,'scan-video',(result,err)=>{
-        if(result){ const code=result.getText(); if(barcodeReader){try{barcodeReader.reset();}catch(e){} barcodeReader=null;} overlay.remove(); lookupBarcode(code); }
-      }).then(()=>{ const s=document.getElementById('scan-status'); if(s) s.textContent='Namieriť kameru na čiarový kód'; }).catch(e=>{ const s=document.getElementById('scan-status'); if(s) s.textContent='Kamera nedostupná – použi manuálne zadanie vyššie.'; });
-    } catch(e){}
+  // Kamera sekcia
+  const isHttps = location.protocol==='https:' || location.hostname==='localhost';
+  const hasCamera = !!navigator.mediaDevices?.getUserMedia;
+  const hasZXing = typeof ZXing !== 'undefined';
+
+  if (!isHttps) {
+    sheet.appendChild(h('div',{class:'card',style:'text-align:center;padding:16px;margin-bottom:10px'},[
+      h('div',{style:'color:var(--txtDim);font-size:13px'},'📷 Kamera funguje len cez https://'),
+      h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:4px'},'Na GitHub Pages to bude fungovať. Manuálne zadanie funguje vždy.'),
+    ]));
+  } else if (!hasCamera) {
+    sheet.appendChild(h('div',{class:'card',style:'text-align:center;padding:16px;margin-bottom:10px'},[
+      h('div',{style:'color:var(--txtDim);font-size:13px'},'Kamera nie je dostupná v tomto prehliadači'),
+    ]));
   } else {
-    sheet.appendChild(h('p',{style:'color:var(--txtFaint);font-size:12px;text-align:center;margin-bottom:10px'},'Kamera dostupná len na https://'));
+    // Kamera je dostupná – zobraz UI a spusti
+    sheet.appendChild(h('p',{class:'section-title'},'KAMERA'));
+    const vw=h('div',{style:'position:relative;border-radius:12px;overflow:hidden;background:#111;aspect-ratio:4/3;margin-bottom:8px'});
+    const video=h('video',{id:'scan-video',style:'width:100%;height:100%;object-fit:cover;display:block'});
+    video.setAttribute('playsinline',''); // iOS Safari vyžaduje bez hodnoty
+    video.setAttribute('muted','');
+    video.setAttribute('autoplay','');
+    vw.appendChild(video);
+    // Zameriavací rámik
+    vw.appendChild(h('div',{style:'position:absolute;top:50%;left:10%;right:10%;height:2px;background:var(--pri);box-shadow:0 0 10px var(--pri);transform:translateY(-50%);pointer-events:none'}));
+    sheet.appendChild(vw);
+    const statusEl=h('p',{id:'scan-status',style:'color:var(--txtDim);font-size:12px;text-align:center;margin-bottom:10px'},'Spúšťam kameru...');
+    sheet.appendChild(statusEl);
+
+    function setStatus(msg, isError=false) {
+      if(statusEl) { statusEl.textContent=msg; statusEl.style.color=isError?'var(--red)':'var(--txtDim)'; }
+    }
+
+    // Spusti kameru cez getUserMedia priamo (iOS Safari kompatibilné)
+    setTimeout(async ()=>{
+      try {
+        // iOS Safari: environment camera, bez facingMode môže otvoriť prednú
+        const constraints = {
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const videoEl = document.getElementById('scan-video');
+        if (!videoEl || !document.body.contains(overlay)) { stream.getTracks().forEach(t=>t.stop()); return; }
+        videoEl.srcObject = stream;
+        await videoEl.play().catch(()=>{});
+        setStatus('Namieriť kameru na čiarový kód');
+
+        // Teraz spusti ZXing ak je dostupný
+        if (hasZXing) {
+          try {
+            barcodeReader = new ZXing.BrowserMultiFormatReader();
+            // Použij existujúci video element
+            barcodeReader.decodeFromVideoElement(videoEl, (result, err)=>{
+              if (result) {
+                const code = result.getText();
+                stopScan(); overlay.remove(); lookupBarcode(code);
+              }
+            });
+          } catch(e) {
+            // ZXing error – zostane len video, manuálne zadanie funguje
+            setStatus('Skener aktívny – alebo zadaj kód ručne vyššie');
+          }
+        } else {
+          setStatus('Kamera spustená – zadaj EAN kód zo škatule ručne vyššie');
+        }
+      } catch(err) {
+        let msg = 'Kamera nedostupná – použi manuálne zadanie.';
+        if (err.name==='NotAllowedError') msg = 'Prístup ku kamere odmietnutý. Povol ho v nastaveniach Safari → Webové stránky → Kamera.';
+        else if (err.name==='NotFoundError') msg = 'Žiadna kamera nenájdená.';
+        setStatus(msg, true);
+      }
+    }, 100);
   }
-  sheet.appendChild(h('button',{class:'btn btn-ghost',onClick:()=>{ if(barcodeReader){try{barcodeReader.reset();}catch(e){} barcodeReader=null;} overlay.remove(); renderFoodPicker(); }},'Zrušiť'));
+
+  sheet.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:4px',onClick:()=>{
+    stopScan(); overlay.remove(); renderFoodPicker();
+  }},'Zavrieť'));
   overlay.appendChild(sheet); document.body.appendChild(overlay);
 }
 
