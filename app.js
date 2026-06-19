@@ -720,7 +720,7 @@ function renderWelcome() {
   center.appendChild(h('div', {style:'width:88px;height:88px;border-radius:24px;background:linear-gradient(135deg,var(--pri),var(--acc));display:flex;align-items:center;justify-content:center;margin-bottom:20px'},
     h('span', {style:'font-size:44px;font-weight:900;color:#fff'}, 'X')));
   center.appendChild(h('h1', {}, 'ForgeX'));
-  center.appendChild(h('p', {class:'subtitle'}, 'Vykovaj svoju najlepšiu verziu'));
+  center.appendChild(h('p', {class:'subtitle'}, 'Forged by effort, not luck.'));
 
   const bottom = h('div', {style:'padding-bottom:10px'});
   bottom.appendChild(h('button', {class:'btn btn-primary', onClick:()=>navigate('ob_gender')}, 'Začať'));
@@ -3650,6 +3650,41 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(()=>{}));
 }
 
-document.addEventListener('DOMContentLoaded', render);
-if (document.readyState !== 'loading') render();
+// Generuje malé iskry vyletujúce z loga počas splash animácie
+function spawnSparks() {
+  const wrap = document.querySelector('.splash-logo-wrap');
+  if (!wrap) return;
+  for (let i=0;i<14;i++) {
+    const spark = document.createElement('div');
+    spark.className = 'splash-spark';
+    const size = 2 + Math.random()*3;
+    const angle = Math.random()*Math.PI*2;
+    const dist = 50 + Math.random()*70;
+    spark.style.width = size+'px';
+    spark.style.height = size+'px';
+    spark.style.left = '50%';
+    spark.style.top = '50%';
+    spark.style.setProperty('--sx', Math.cos(angle)*dist+'px');
+    spark.style.setProperty('--sy', Math.sin(angle)*dist+'px');
+    spark.style.animation = `sparkFly ${0.6+Math.random()*0.5}s ease-out ${0.3+Math.random()*0.3}s forwards`;
+    wrap.appendChild(spark);
+  }
+}
+
+function initApp() {
+  // Appka sa vykresľuje "pod" splash screenom, takže keď splash zmizne, je hneď pripravená
+  render();
+  spawnSparks();
+  const splash = document.getElementById('splash');
+  const SPLASH_DURATION = 1500; // ms – celkový čas zobrazenia splash screenu
+  setTimeout(()=>{
+    if (!splash) return;
+    splash.classList.add('fade-out');
+    setTimeout(()=> splash.remove(), 380);
+  }, SPLASH_DURATION);
+}
+
+document.addEventListener('DOMContentLoaded', initApp);
+if (document.readyState !== 'loading') initApp();
+
 
