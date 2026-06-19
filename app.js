@@ -244,6 +244,7 @@ const DEFAULT_PROFILE = {
   showRIR:false,             // zobrazovať RIR pole (pre pokročilých); default skryté
   // ── Home layout (vlastné usporiadanie sekcií) ──
   homeLayout: ['hero','calories','water_streak'], // poradie sekcií; ak chýba sekcia v zozname = vypnutá
+  warmupOverrides: {}, // per-cvik override pre zobrazenie rozcvičky (true/false), appka inak navrhuje sama
 };
 const HOME_SECTIONS_META = {
   hero:        { label:'Dnešný tréning', icon:'🏋️', removable:false },
@@ -283,7 +284,7 @@ function getActiveDays() {
     const split = CUSTOM_SPLITS.find(s=>s.id===ACTIVE_SPLIT_ID);
     if (split) return split.days;
   }
-  return DAYS; // preset PPL fallback
+  return []; // žiadny skrytý predvolený split - užívateľ si musí vytvoriť svoj vlastný
 }
 
 
@@ -697,6 +698,7 @@ function render() {
     split_edit_day: renderSplitEditDay,
     workout_mode: renderWorkoutMode,
     home_customize: renderHomeCustomize,
+    loading_plan: renderLoadingPlan,
   };
   const fn = routes[currentRoute] || renderMainApp;
   root.appendChild(fn());
@@ -1259,10 +1261,22 @@ let trainingSubView = 'plan'; // plan | history
 function renderTabTraining() {
   const wrap = h('div', {style:'flex:1;display:flex;flex-direction:column;min-height:0'});
   const activeDays = getActiveDays();
+
+  // Žiadny split ešte neexistuje - jasná výzva na vytvorenie, žiadny skrytý default
+  if (!activeDays.length) {
+    const empty = h('div',{class:'scroll',style:'display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 24px'});
+    empty.appendChild(h('div',{style:'font-size:40px;margin-bottom:14px'},'🏋️'));
+    empty.appendChild(h('h2',{style:'margin-bottom:8px'},'Zatiaľ nemáš tréningový plán'));
+    empty.appendChild(h('p',{class:'subtitle',style:'margin-bottom:20px'},'Appka ti navrhne split na základe tvojich údajov. Vyber si počet dní a poďme na to.'));
+    empty.appendChild(h('button',{class:'btn btn-primary',onClick:()=>{ newSplitDaysCount=3; navigate('split_new'); }},'+ Vytvoriť môj tréningový plán'));
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
   if (!activeDays.find(d=>d.id===activeDayId)) activeDayId = activeDays[0]?.id;
 
   const splitHeader = h('div', {style:'padding:16px 20px 0;display:flex;align-items:center;justify-content:space-between'});
-  const splitName = ACTIVE_SPLIT_ID ? (CUSTOM_SPLITS.find(s=>s.id===ACTIVE_SPLIT_ID)?.name || 'Môj split') : 'PPL Split (predvolený)';
+  const splitName = CUSTOM_SPLITS.find(s=>s.id===ACTIVE_SPLIT_ID)?.name || 'Môj split';
   splitHeader.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px;font-weight:600'}, '📋 '+splitName));
   splitHeader.appendChild(h('button',{class:'btn btn-ghost btn-sm', onClick:()=>navigate('split_manage')}, '⚙️ Splits'));
   wrap.appendChild(splitHeader);
@@ -1451,6 +1465,47 @@ function renderExerciseCard(day, ex, idx) {
     const targetReps = parseBottomReps(ex.reps) || 8;
     const suggestedWeight = suggestion ? suggestion.weight : null;
     const suggestedReps = suggestion ? suggestion.reps : targetReps;
+
+    // ── Rozcvičovacie série (warm-up) ──
+    // Appka navrhuje rozcvičku pre zložené cviky (rank 1-2), užívateľ si ju môže kedykoľvek
+    // sám zapnúť/vypnúť pre konkrétny cvik (princíp "appka vedie, ty rozhoduješ")
+    const exRank = exerciseOrderRank(ex);
+    const warmupSuggestedByDefault = exRank <= 2; // zložené cviky
+    const warmupKey = `warmup_${ex.id}`;
+    if (!PROFILE.warmupOverrides) PROFILE.warmupOverrides = {};
+    const warmupOverride = PROFILE.warmupOverrides[warmupKey]; // true/false/undefined
+    const showWarmup = warmupOverride!=null ? warmupOverride : warmupSuggestedByDefault;
+    const refWeight = suggestedWeight!=null ? suggestedWeight : (sess.sets?.[0]?.weight ? parseFloat(sess.sets[0].weight) : null);
+
+    const warmupWrap = h('div',{style:'margin-bottom:12px'});
+    const warmupToggleRow = h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:8px'});
+    warmupToggleRow.appendChild(h('span',{style:'font-size:12px;color:var(--txtDim);flex:1'},'🔥 Rozcvičovacie série'));
+    const wTg = h('button',{class:'toggle'+(showWarmup?' on':''), style:'transform:scale(.8)'});
+    wTg.appendChild(h('div',{class:'toggle-knob'}));
+    wTg.addEventListener('click',()=>{
+      PROFILE.warmupOverrides[warmupKey] = !showWarmup;
+      saveProfile({warmupOverrides:PROFILE.warmupOverrides});
+      render();
+    });
+    warmupToggleRow.appendChild(wTg);
+    warmupWrap.appendChild(warmupToggleRow);
+
+    if (showWarmup) {
+      if (refWeight) {
+        const sets = calcWarmupSets(refWeight);
+        const wuCard = h('div',{class:'card',style:'background:var(--surf2);margin-bottom:4px;padding:10px 12px'});
+        sets.forEach(s=>{
+          wuCard.appendChild(h('div',{style:'display:flex;justify-content:space-between;font-size:12px;padding:3px 0'},[
+            h('span',{style:'color:var(--txtFaint)'},`${s.pct}%`),
+            h('span',{style:'color:var(--txt);font-weight:600'},`${displayWeight(s.weight)} ${weightUnit()} × ${s.reps}`),
+          ]));
+        });
+        warmupWrap.appendChild(wuCard);
+      } else {
+        warmupWrap.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;padding:4px 0'},'Zadaj váhu prvej série, rozcvička sa vypočíta automaticky.'));
+      }
+    }
+    body.appendChild(warmupWrap);
 
     for (let si=0; si<ex.sets; si++) {
       const s = (sess.sets||[])[si] || {};
@@ -2870,16 +2925,37 @@ function openPersonalDataModal() {
 
     // Cieľ – aktualizuj segment bez close/reopen
     sheet.appendChild(h('label',{class:'input-label'},'Cieľ'));
-    const goalSeg = h('div',{class:'segment',style:'margin-bottom:14px;flex-wrap:wrap', id:'goal-seg'});
+    const goalSeg = h('div',{class:'segment',style:'margin-bottom:10px;flex-wrap:wrap', id:'goal-seg'});
     Object.entries(GOAL_LABELS).forEach(([k,v])=>{
       const b = h('button',{class:'segment-btn'+(PROFILE.goal===k?' active':''),style:'flex:1 1 45%',
         onClick:()=>{
+          const oldTarget = calcCalorieTarget(calcTDEE(calcBMR(PROFILE), PROFILE.activityLevel), PROFILE.goal);
           saveProfile({goal:k});
           goalSeg.querySelectorAll('.segment-btn').forEach(x=>x.classList.remove('active'));
           b.classList.add('active');
+          const newTarget = calcCalorieTarget(calcTDEE(calcBMR(PROFILE), PROFILE.activityLevel), PROFILE.goal);
+          updateGoalPreview(oldTarget, newTarget);
         }}, v.split(' ')[0]);
       goalSeg.appendChild(b);
     });
+    // Živý náhľad zmeny kalorického cieľa
+    const goalPreview = h('div',{id:'goal-preview',style:'display:none;margin-bottom:14px'});
+    sheet.appendChild(goalPreview);
+    function updateGoalPreview(oldT, newT) {
+      goalPreview.innerHTML = '';
+      if (oldT==null || newT==null || oldT===newT) { goalPreview.style.display='none'; return; }
+      goalPreview.style.display='block';
+      const diff = newT - oldT;
+      const card = h('div',{class:'card',style:'background:var(--priDim);border-color:var(--pri)'});
+      card.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px;margin-bottom:4px'},'⚡ Cieľ zmenený — nový denný kalorický cieľ:'));
+      card.appendChild(h('div',{style:'display:flex;align-items:baseline;gap:8px'},[
+        h('span',{style:'color:var(--pri);font-size:22px;font-weight:800'},`${newT} kcal`),
+        h('span',{style:'color:var(--txtFaint);font-size:13px;text-decoration:line-through'},`${oldT} kcal`),
+        h('span',{style:`color:${diff>0?'var(--green)':'var(--blue)'};font-size:12px;font-weight:700`},`${diff>0?'+':''}${diff}`),
+      ]));
+      card.appendChild(h('div',{style:'color:var(--txtFaint);font-size:11px;margin-top:6px'},'Makrá (bielkoviny/sacharidy/tuky) sa prepočítali automaticky.'));
+      goalPreview.appendChild(card);
+    }
     sheet.appendChild(goalSeg);
 
     // Aktivita
@@ -2888,7 +2964,12 @@ function openPersonalDataModal() {
     Object.entries(ACTIVITY_LABELS).forEach(([k,v])=>{
       const opt=h('option',{value:k},v); if(PROFILE.activityLevel===k) opt.selected=true; actSel.appendChild(opt);
     });
-    actSel.addEventListener('change',(e)=>saveProfile({activityLevel:e.target.value}));
+    actSel.addEventListener('change',(e)=>{
+      const oldTarget = calcCalorieTarget(calcTDEE(calcBMR(PROFILE), PROFILE.activityLevel), PROFILE.goal);
+      saveProfile({activityLevel:e.target.value});
+      const newTarget = calcCalorieTarget(calcTDEE(calcBMR(PROFILE), PROFILE.activityLevel), PROFILE.goal);
+      updateGoalPreview(oldTarget, newTarget);
+    });
     sheet.appendChild(actSel);
   });
 }
@@ -3009,9 +3090,21 @@ function openNotifModal() {
       return;
     }
     const perm = Notification.permission;
-    if (perm!=='granted') {
+    if (perm==='denied') {
+      sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:10px'},'Notifikácie sú zablokované na úrovni systému.'));
+      sheet.appendChild(h('p',{style:'color:var(--txtFaint);font-size:12px;line-height:1.5'},'Povoľ ich v Nastaveniach telefónu → Safari (alebo Chrome) → Webové stránky → ForgeX → Notifikácie, potom sa vráť sem.'));
+    } else if (perm!=='granted') {
       sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Povoľ notifikácie, aby ťa appka upozornila keď skončí prestávka.'));
-      sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{ requestNotifPermission(); closeModal(); }},'🔔 Povoliť notifikácie'));
+      const btn = h('button',{class:'btn btn-primary'},'🔔 Povoliť notifikácie');
+      btn.addEventListener('click', async ()=>{
+        btn.disabled = true;
+        btn.textContent = 'Čakám na povolenie...';
+        await requestNotifPermission();
+        // Po vyriešení (granted/denied) prekresli modal nanovo - nezatvárať predčasne
+        closeModal();
+        openNotifModal();
+      });
+      sheet.appendChild(btn);
     } else {
       const toggleRow = h('div',{class:'setting-toggle-row',style:'padding:14px 0'});
       toggleRow.appendChild(h('span',{class:'setting-label'},'Upozornenie po prestávke'));
@@ -3021,6 +3114,7 @@ function openNotifModal() {
       toggleRow2.appendChild(h('span',{class:'setting-label'},'Denná pripomienka tréningu'));
       toggleRow2.appendChild(makeToggle('notifDaily'));
       sheet.appendChild(toggleRow2);
+      sheet.appendChild(h('p',{style:'color:var(--txtFaint);font-size:11px;margin-top:10px;line-height:1.5'},'Notifikácie sú povolené na úrovni systému. Vypnutím prepínačov hore appka jednoducho neposiela upozornenia, aj keď povolenie zostáva platné.'));
     }
   });
 }
@@ -3219,6 +3313,40 @@ function renderWorkoutMode() {
   const suggestedWeight = suggestion ? suggestion.weight : null;
   const suggestedReps = suggestion ? suggestion.reps : targetReps;
 
+  // ── Rozcvičovacie série (warm-up) – rovnaký princíp ako v normálnom zobrazení ──
+  const exRankWO = exerciseOrderRank(ex);
+  const warmupSuggestedByDefaultWO = exRankWO <= 2;
+  const warmupKeyWO = `warmup_${ex.id}`;
+  if (!PROFILE.warmupOverrides) PROFILE.warmupOverrides = {};
+  const warmupOverrideWO = PROFILE.warmupOverrides[warmupKeyWO];
+  const showWarmupWO = warmupOverrideWO!=null ? warmupOverrideWO : warmupSuggestedByDefaultWO;
+  const refWeightWO = suggestedWeight!=null ? suggestedWeight : (sess.sets?.[0]?.weight ? parseFloat(sess.sets[0].weight) : null);
+
+  const warmupWrapWO = h('div',{style:'margin-bottom:14px'});
+  const warmupToggleRowWO = h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:8px'});
+  warmupToggleRowWO.appendChild(h('span',{style:'font-size:12px;color:var(--txtDim);flex:1'},'🔥 Rozcvičovacie série'));
+  const wTgWO = h('button',{class:'toggle'+(showWarmupWO?' on':''), style:'transform:scale(.8)'});
+  wTgWO.appendChild(h('div',{class:'toggle-knob'}));
+  wTgWO.addEventListener('click',()=>{
+    PROFILE.warmupOverrides[warmupKeyWO] = !showWarmupWO;
+    saveProfile({warmupOverrides:PROFILE.warmupOverrides});
+    render();
+  });
+  warmupToggleRowWO.appendChild(wTgWO);
+  warmupWrapWO.appendChild(warmupToggleRowWO);
+  if (showWarmupWO && refWeightWO) {
+    const setsWO = calcWarmupSets(refWeightWO);
+    const wuCardWO = h('div',{class:'card',style:'background:var(--surf2);padding:10px 12px'});
+    setsWO.forEach(s=>{
+      wuCardWO.appendChild(h('div',{style:'display:flex;justify-content:space-between;font-size:12px;padding:3px 0'},[
+        h('span',{style:'color:var(--txtFaint)'},`${s.pct}%`),
+        h('span',{style:'color:var(--txt);font-weight:600'},`${displayWeight(s.weight)} ${weightUnit()} × ${s.reps}`),
+      ]));
+    });
+    warmupWrapWO.appendChild(wuCardWO);
+  }
+  scroll.appendChild(warmupWrapWO);
+
   for (let si=0; si<ex.sets; si++) {
     const s = (sess.sets||[])[si] || {};
     const isDone = !!s.done;
@@ -3295,16 +3423,11 @@ function renderSplitManage() {
 
   const scroll = h('div',{class:'scroll'});
 
-  // Preset PPL karta
-  const presetCard = h('div',{class:'card'+(!ACTIVE_SPLIT_ID?' card-accent':''), style:'margin-bottom:10px;cursor:pointer', onClick:()=>{ ACTIVE_SPLIT_ID=null; saveActiveSplitId(); render(); }});
-  const presetTop = h('div',{style:'display:flex;align-items:center;justify-content:space-between'});
-  presetTop.appendChild(h('div',{},[
-    h('div',{style:'color:var(--txt);font-weight:700;font-size:15px'},'PPL Split (predvolený)'),
-    h('div',{style:'color:var(--txtDim);font-size:12px;margin-top:3px'},'5 dní/týždeň · Push/Pull/Legs/Upper/Down'),
-  ]));
-  if (!ACTIVE_SPLIT_ID) presetTop.appendChild(h('span',{class:'check-dot'},'✓'));
-  presetCard.appendChild(presetTop);
-  scroll.appendChild(presetCard);
+  if (!CUSTOM_SPLITS.length) {
+    scroll.appendChild(h('div',{class:'card',style:'text-align:center;padding:24px;margin-bottom:14px'},[
+      h('div',{style:'color:var(--txtDim);font-size:13px'},'Zatiaľ nemáš žiadny split. Vytvor si svoj prvý tréningový plán nižšie.'),
+    ]));
+  }
 
   // Vlastné splits
   CUSTOM_SPLITS.forEach(split=>{
@@ -3341,10 +3464,82 @@ function renderSplitManage() {
   return screen;
 }
 
+// ═══════════════════════════ LOADING PLAN (D2) ══════════════════════════
+// Stav pripravovaného splitu - parametre uložené pred spustením loading animácie
+let pendingSplitDays = null;
+let pendingSplitGender = null;
+
+function startSplitGeneration(daysCount, gender) {
+  pendingSplitDays = daysCount;
+  pendingSplitGender = gender;
+  navigate('loading_plan');
+}
+
+const LOADING_STEPS = [
+  'Analyzujem tvoj cieľ...',
+  'Vyberám vhodné cviky...',
+  'Vyvažujem svalové skupiny...',
+  'Kovám tvoj plán...',
+  'Posledné úpravy...',
+];
+
+function renderLoadingPlan() {
+  const screen = h('div',{class:'screen'});
+  const wrap = h('div',{class:'lp-wrap'});
+
+  const glow = h('div',{class:'lp-anvil-glow'});
+  glow.appendChild(h('div',{class:'lp-ring r1'}));
+  glow.appendChild(h('div',{class:'lp-ring r2'}));
+  glow.appendChild(h('div',{class:'lp-ring r3'}));
+  glow.appendChild(h('div',{class:'lp-hammer'},'🔨'));
+  wrap.appendChild(glow);
+
+  wrap.appendChild(h('div',{class:'lp-title'},'Pripravujem tvoj plán'));
+  const stepEl = h('div',{class:'lp-step', id:'lp-step-text'}, LOADING_STEPS[0]);
+  wrap.appendChild(stepEl);
+
+  const track = h('div',{class:'lp-progress-track'});
+  const fill = h('div',{class:'lp-progress-fill', id:'lp-progress-fill'});
+  track.appendChild(fill);
+  wrap.appendChild(track);
+
+  screen.appendChild(wrap);
+
+  // Po vykreslení spusti animáciu krokov a na konci vygeneruj reálny split
+  setTimeout(()=>runLoadingSequence(), 30);
+
+  return screen;
+}
+
+function runLoadingSequence() {
+  const totalDuration = 2200; // ms
+  const stepCount = LOADING_STEPS.length;
+  const stepDuration = totalDuration / stepCount;
+
+  LOADING_STEPS.forEach((text, i)=>{
+    setTimeout(()=>{
+      const stepEl = document.getElementById('lp-step-text');
+      const fillEl = document.getElementById('lp-progress-fill');
+      if (stepEl) { stepEl.style.opacity=0; setTimeout(()=>{ stepEl.textContent=text; stepEl.style.opacity=1; },150); }
+      if (fillEl) fillEl.style.width = `${Math.round(((i+1)/stepCount)*100)}%`;
+    }, i*stepDuration);
+  });
+
+  setTimeout(()=>{
+    // Vygeneruj reálny návrh splitu a prejdi na náhľad
+    splitDraft = generateSplitFromTemplate(pendingSplitDays, pendingSplitGender);
+    navigate('split_preview');
+  }, totalDuration + 250);
+}
+
 function renderSplitNew() {
   const screen = h('div', {class:'screen'});
   const top = h('div', {style:'padding:calc(var(--safeT) + 16px) var(--pad) 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
-  top.appendChild(h('button',{class:'icon-btn', onClick:()=>{ CUSTOM_SPLITS.length ? navigate('split_manage') : (activeTab='home', navigate('home')); }},'←'));
+  // Počas onboardingu (žiadny split, žiadna história) ide späť na výsledky; inak na správu splitov
+  const isOnboardingContext = !CUSTOM_SPLITS.length && !HISTORY.length;
+  top.appendChild(h('button',{class:'icon-btn', onClick:()=>{
+    isOnboardingContext ? navigate('ob_results') : navigate('split_manage');
+  }},'←'));
   top.appendChild(h('h2',{},'Nový split'));
   screen.appendChild(top);
 
@@ -3380,13 +3575,8 @@ function renderSplitNew() {
 
   const bottom = h('div',{style:'padding:16px var(--pad) calc(var(--safeB) + 16px);display:flex;flex-direction:column;gap:10px'});
   bottom.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
-    splitDraft = generateSplitFromTemplate(newSplitDaysCount, PROFILE.gender);
-    navigate('split_preview');
+    startSplitGeneration(newSplitDaysCount, PROFILE.gender);
   }},'Zobraziť návrh s cvikmi'));
-  // Preskočiť (len ak ešte nemá žiadny split – počas onboardingu)
-  if (!CUSTOM_SPLITS.length) {
-    bottom.appendChild(h('button',{class:'btn btn-ghost', onClick:()=>{ activeTab='home'; navigate('home'); }},'Preskočiť (použiť predvolený PPL)'));
-  }
   screen.appendChild(bottom);
 
   return screen;
@@ -3771,15 +3961,18 @@ function showRestDoneNotification() {
   }
 }
 
-function requestNotifPermission() {
-  if (!('Notification' in window)) { alert('Tvoj prehliadač nepodporuje notifikácie.'); return; }
-  Notification.requestPermission().then(perm=>{
+async function requestNotifPermission() {
+  if (!('Notification' in window)) { alert('Tvoj prehliadač nepodporuje notifikácie.'); return 'unsupported'; }
+  try {
+    const perm = await Notification.requestPermission();
     if (perm==='granted') {
       saveProfile({notifRest:true});
       try { new Notification('ForgeX', { body:'Notifikácie zapnuté ✓' }); } catch(e){}
     }
-    render();
-  });
+    return perm;
+  } catch(e) {
+    return 'denied';
+  }
 }
 
 // Manuálne spustenie časovača (tlačidlo v tréningu)

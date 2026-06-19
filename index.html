@@ -462,6 +462,20 @@ textarea.note-input{
 @keyframes sparkFly{0%{opacity:0;transform:translate(0,0) scale(1)}10%{opacity:1}100%{opacity:0;transform:translate(var(--sx),var(--sy)) scale(.2)}}
 #splash.fade-out{animation:splashFadeOut .35s ease-in forwards}
 @keyframes splashFadeOut{to{opacity:0}}
+
+/* ═══ LOADING PLAN (Pripravujem tvoj plán) ═══ */
+.lp-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 32px;text-align:center}
+.lp-anvil-glow{position:relative;width:130px;height:130px;display:flex;align-items:center;justify-content:center;margin-bottom:28px}
+.lp-ring{position:absolute;inset:0;border-radius:50%;border:2px solid var(--pri);opacity:.25;animation:lpPulse 1.6s ease-out infinite}
+.lp-ring.r2{animation-delay:.5s}
+.lp-ring.r3{animation-delay:1s}
+@keyframes lpPulse{0%{transform:scale(.5);opacity:.5}100%{transform:scale(1.5);opacity:0}}
+.lp-hammer{font-size:48px;animation:lpHammer 0.9s ease-in-out infinite;transform-origin:70% 20%}
+@keyframes lpHammer{0%,100%{transform:rotate(-28deg)}45%{transform:rotate(18deg)}55%{transform:rotate(22deg)}}
+.lp-title{font-size:21px;font-weight:800;color:var(--txt);letter-spacing:-.4px;margin-bottom:8px}
+.lp-step{font-size:13px;color:var(--txtDim);min-height:18px;transition:opacity .3s}
+.lp-progress-track{width:200px;height:4px;background:var(--surf3);border-radius:99px;margin-top:24px;overflow:hidden}
+.lp-progress-fill{height:100%;background:linear-gradient(90deg,var(--pri),var(--acc));border-radius:99px;width:0%;transition:width .4s ease-out}
 </style>
 </head>
 <body>
