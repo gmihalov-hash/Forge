@@ -775,6 +775,20 @@ function h(tag, attrs={}, children=[]) {
   return el;
 }
 
+// Manuálny AdSense banner – vkladá <ins class="adsbygoogle"> a hneď nechá Google naplniť reklamu
+function adBanner() {
+  const wrap = h('div',{style:'margin:16px 0;min-height:50px;overflow:hidden'});
+  const ins = h('ins',{
+    class:'adsbygoogle', style:'display:block',
+    'data-ad-client':'ca-pub-9909275615095854',
+    'data-ad-format':'auto',
+    'data-full-width-responsive':'true',
+  });
+  wrap.appendChild(ins);
+  setTimeout(()=>{ try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch(e){} }, 0);
+  return wrap;
+}
+
 function vibrate(ms=10){ if(navigator.vibrate) navigator.vibrate(ms); }
 function el(html) {
   const t = document.createElement('template');
@@ -1328,6 +1342,8 @@ function renderTabHome() {
 
   // Tlačidlo na úpravu rozloženia – decentné, na konci
   wrap.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:4px;font-size:12px', onClick:()=>navigate('home_customize')},'⚙ Upraviť domovskú obrazovku'));
+
+  wrap.appendChild(adBanner());
 
   return wrap;
 }
@@ -2306,6 +2322,8 @@ function renderTabNutrition() {
   const addBtn = h('button',{class:'btn btn-primary',style:'margin-top:16px', onClick:()=>openAddFoodModal()},'+ Pridať jedlo');
   wrap.appendChild(addBtn);
 
+  wrap.appendChild(adBanner());
+
   return wrap;
 }
 
@@ -2700,6 +2718,8 @@ function renderTabStats() {
   if (statsSubView==='training') renderStatsTraining(wrap);
   else if (statsSubView==='body') renderStatsBody(wrap);
   else if (statsSubView==='week') renderStatsWeek(wrap);
+
+  wrap.appendChild(adBanner());
 
   return wrap;
 }
