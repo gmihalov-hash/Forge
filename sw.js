@@ -1,4 +1,4 @@
-const CACHE = 'forgex-v25';
+const CACHE = 'forgex-v26';
 const ASSETS = ['./index.html'];
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))); });
 self.addEventListener('activate', e => { e.waitUntil(Promise.all([
