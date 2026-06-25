@@ -3651,7 +3651,7 @@ function renderWorkoutMode() {
   if (!PROFILE.warmupOverrides) PROFILE.warmupOverrides = {};
   const warmupOverrideWO = PROFILE.warmupOverrides[warmupKeyWO];
   const showWarmupWO = warmupOverrideWO!=null ? warmupOverrideWO : warmupSuggestedByDefaultWO;
-  const refWeightWO = suggestedWeight!=null ? suggestedWeight : (sess.sets?.[0]?.weight ? parseFloat(sess.sets[0].weight) : null);
+  const refWeightWO = sess.sets?.[0]?.weight ? parseFloat(sess.sets[0].weight) : suggestedWeight;
 
   const warmupWrapWO = h('div',{style:'margin-bottom:14px'});
   const warmupToggleRowWO = h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:8px'});
@@ -3696,7 +3696,7 @@ function renderWorkoutMode() {
     const wRow = h('div',{class:'stepper-row'});
     wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',-wStep)},'−'));
     wRow.appendChild(h('input',{class:'stepper-val',type:'number',inputmode:'decimal',value:wVal,placeholder:'0',id:`w-${ex.id}-${si}`,
-      onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight', inputToKg(e.target.value)); }}));
+      onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight', inputToKg(e.target.value)); if (si===0) render(); }}));
     wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',wStep)},'+'));
     wStepper.appendChild(wRow);
     fields.appendChild(wStepper);
