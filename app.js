@@ -3479,7 +3479,7 @@ function renderWorkoutMode() {
 
 function renderSplitManage() {
   const screen = h('div', {class:'screen'});
-  const top = h('div', {class:'safe-top', style:'padding:16px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
+  const top = h('div', {style:'padding:calc(var(--safeT) + 16px) 20px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
   top.appendChild(h('button',{class:'icon-btn', onClick:backToTraining},'←'));
   top.appendChild(h('h2',{},'Moje splits'));
   screen.appendChild(top);
