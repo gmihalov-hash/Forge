@@ -3063,6 +3063,7 @@ function renderTabProfile() {
   const settingsCard = h('div',{class:'card',style:'padding:0'});
   const settings = [
     ['👤','Osobné údaje',null, ()=>openPersonalDataModal()],
+    ['🔑','Zmeniť heslo',null, ()=>openChangePasswordModal()],
     ['📏','Jednotky', PROFILE.units==='imperial'?'lbs / in':'kg / cm', ()=>openUnitsModal()],
     ['⏱','Časovač prestávky', fmtTime(PROFILE.restSeconds||90), ()=>openTimerModal()],
     ['📈','Progresívne preťaženie', progRuleLabel(), ()=>openProgressionModal()],
@@ -3220,6 +3221,56 @@ function openUnitsModal() {
     });
     sheet.appendChild(seg);
   });
+}
+
+function openChangePasswordModal() {
+  let newPass = '', confirmPass = '', error = '', info = '', loading = false;
+
+  const overlay = h('div',{class:'modal-overlay', onClick:(e)=>{ if(e.target===overlay) closeModal(); }});
+  const sheet = h('div',{class:'modal-sheet'});
+  sheet.appendChild(h('div',{class:'modal-handle'}));
+  sheet.appendChild(h('h2',{style:'margin-bottom:16px'},'Zmeniť heslo'));
+
+  const msgWrap = h('div',{});
+  sheet.appendChild(msgWrap);
+
+  sheet.appendChild(h('label',{class:'input-label'},'Nové heslo'));
+  const passWrap = h('div',{class:'input-wrap',style:'margin-bottom:14px'});
+  passWrap.appendChild(h('input',{type:'password', placeholder:'••••••••', autocomplete:'new-password',
+    onInput:(e)=>{ newPass = e.target.value; }}));
+  sheet.appendChild(passWrap);
+
+  sheet.appendChild(h('label',{class:'input-label'},'Potvrď nové heslo'));
+  const confirmWrap = h('div',{class:'input-wrap',style:'margin-bottom:8px'});
+  confirmWrap.appendChild(h('input',{type:'password', placeholder:'••••••••', autocomplete:'new-password',
+    onInput:(e)=>{ confirmPass = e.target.value; }}));
+  sheet.appendChild(confirmWrap);
+
+  const submitBtn = h('button',{class:'btn btn-primary', style:'margin-top:8px'}, 'Zmeniť heslo');
+  submitBtn.addEventListener('click', async ()=>{
+    error = ''; info = '';
+    if (!newPass || newPass.length<6) { error='Heslo musí mať aspoň 6 znakov.'; renderMsg(); return; }
+    if (newPass !== confirmPass) { error='Heslá sa nezhodujú.'; renderMsg(); return; }
+    loading = true; submitBtn.textContent = 'Ukladám…'; submitBtn.disabled = true;
+    try {
+      const { error: err } = await supabaseClient.auth.updateUser({ password: newPass });
+      if (err) { error = err.message; renderMsg(); }
+      else { closeModal(); showToast('✓ Heslo zmenené'); }
+    } catch(e) {
+      error = 'Nepodarilo sa zmeniť heslo. Skontroluj pripojenie.'; renderMsg();
+    }
+    loading = false; submitBtn.textContent = 'Zmeniť heslo'; submitBtn.disabled = false;
+  });
+  sheet.appendChild(submitBtn);
+
+  function renderMsg() {
+    msgWrap.innerHTML = '';
+    if (error) msgWrap.appendChild(h('p',{style:'color:var(--red);font-size:13px;margin-bottom:10px'}, error));
+    if (info) msgWrap.appendChild(h('p',{style:'color:var(--pri);font-size:13px;margin-bottom:10px'}, info));
+  }
+
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
 }
 
 // Pomocná funkcia pre toggle – aktualizuje DOM priamo bez close/reopen (iOS Safari fix)
