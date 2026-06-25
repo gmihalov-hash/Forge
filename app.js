@@ -1555,6 +1555,24 @@ function getPrevBest(exId) {
   return best;
 }
 
+// Epley odhad 1RM
+function estimate1RM(weight, reps) {
+  if (!weight || !reps) return 0;
+  return reps<=1 ? weight : weight * (1 + reps/30);
+}
+
+function getBestE1RM(exId) {
+  let best = 0;
+  HISTORY.forEach(e=>{
+    if (!e.data[exId]) return;
+    (e.data[exId].sets||[]).filter(s=>s.done&&s.weight&&s.reps).forEach(s=>{
+      const e1rm = estimate1RM(parseFloat(s.weight), parseInt(s.reps,10));
+      if (e1rm>best) best = e1rm;
+    });
+  });
+  return best;
+}
+
 function renderDayPlan(activeDays) {
   const days = activeDays || getActiveDays();
   const day = days.find(d=>d.id===activeDayId);
@@ -1763,7 +1781,7 @@ function renderExerciseCard(day, ex, idx) {
       wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',-wStep)},'−'));
       const wInput = h('input',{class:'stepper-val',type:'number',inputmode:'decimal',value:wVal,placeholder:'0',
         id:`w-${ex.id}-${si}`,
-        onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight', inputToKg(e.target.value)); }});
+        onChange:(e)=>{ setSetVal(day.id,ex.id,si,'weight', inputToKg(e.target.value)); if (si===0) render(); }});
       wRow.appendChild(wInput);
       wRow.appendChild(h('button',{class:'stepper-btn', onClick:()=>adjustSetField(day.id,ex.id,si,'weight',wStep)},'+'));
       wStepper.appendChild(wRow);
@@ -1856,6 +1874,20 @@ function completeSet(dayId, exId, setIdx, displayedW, displayedR, restSeconds) {
     if (s.reps==null || s.reps==='') s.reps = String(displayedR);
     s.done = true;
     vibrate(15);
+
+    // Okamžitá oslava nového osobného maxima (e1RM) pri uložení série
+    const w = parseFloat(s.weight)||0;
+    const r = parseInt(s.reps,10)||0;
+    if (w>0 && r>0) {
+      const prevE1RM = getBestE1RM(exId);
+      const newE1RM = estimate1RM(w,r);
+      if (newE1RM > prevE1RM && prevE1RM > 0) {
+        const ex = getExerciseById(exId);
+        vibrate(40);
+        showToast(`🏆 Nové osobné maximum! ${ex?ex.name+': ':''}${displayWeight(w)}${weightUnit()} × ${r}`, 3000);
+      }
+    }
+
     saveSession();
     // Spusti časovač prestávky (ak je zapnutý auto-start)
     if (PROFILE.restAutoStart) {
@@ -2789,21 +2821,27 @@ function renderChart(exId) {
   const canvas = document.getElementById('progressChart');
   if (!canvas || typeof Chart==='undefined') return;
   if (chartInstance) { chartInstance.destroy(); chartInstance=null; }
-  const labels=[], values=[];
+  const labels=[], values=[], e1rmValues=[];
   HISTORY.filter(e=>e.data[exId]).forEach(e=>{
     const sets = (e.data[exId].sets||[]).filter(s=>s.done&&s.weight);
     if (!sets.length) return;
     const maxW = Math.max(...sets.map(s=>parseFloat(s.weight||0)));
+    const maxE1RM = Math.max(...sets.map(s=>estimate1RM(parseFloat(s.weight||0), parseInt(s.reps,10)||0)));
     const d = new Date(e.date);
     labels.push(`${d.getDate()}.${d.getMonth()+1}`);
     values.push(PROFILE.units==='imperial' ? kgToLbs(maxW) : maxW);
+    e1rmValues.push(PROFILE.units==='imperial' ? kgToLbs(maxE1RM) : maxE1RM);
   });
   if (!labels.length) return;
   const priColor = getComputedStyle(document.documentElement).getPropertyValue('--pri').trim();
+  const amberColor = getComputedStyle(document.documentElement).getPropertyValue('--amber').trim() || '#F59E0B';
   chartInstance = new Chart(canvas, {
     type:'line',
-    data:{ labels, datasets:[{ label:`Max váha (${weightUnit()})`, data:values, borderColor:priColor, backgroundColor:priColor+'22', pointBackgroundColor:priColor, pointRadius:5, tension:0.3, fill:true }] },
-    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}}, y:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}} } }
+    data:{ labels, datasets:[
+      { label:`Max váha (${weightUnit()})`, data:values, borderColor:priColor, backgroundColor:priColor+'22', pointBackgroundColor:priColor, pointRadius:5, tension:0.3, fill:true },
+      { label:`Odhad 1RM (${weightUnit()})`, data:e1rmValues.map(v=>Math.round(v*10)/10), borderColor:amberColor, backgroundColor:amberColor+'00', pointBackgroundColor:amberColor, pointRadius:3, borderDash:[5,4], tension:0.3, fill:false },
+    ] },
+    options:{ responsive:true, plugins:{legend:{display:true, labels:{color:'#888', font:{size:11}}}}, scales:{ x:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}}, y:{ticks:{color:'#888',font:{size:11}},grid:{color:'#ffffff0a'}} } }
   });
 }
 
