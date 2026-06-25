@@ -1724,7 +1724,7 @@ function renderExerciseCard(day, ex, idx) {
     if (!PROFILE.warmupOverrides) PROFILE.warmupOverrides = {};
     const warmupOverride = PROFILE.warmupOverrides[warmupKey]; // true/false/undefined
     const showWarmup = warmupOverride!=null ? warmupOverride : warmupSuggestedByDefault;
-    const refWeight = suggestedWeight!=null ? suggestedWeight : (sess.sets?.[0]?.weight ? parseFloat(sess.sets[0].weight) : null);
+    const refWeight = sess.sets?.[0]?.weight ? parseFloat(sess.sets[0].weight) : suggestedWeight;
 
     const warmupWrap = h('div',{style:'margin-bottom:12px'});
     const warmupToggleRow = h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:8px'});
