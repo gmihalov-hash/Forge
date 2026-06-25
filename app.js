@@ -252,29 +252,98 @@ const HOME_SECTIONS_META = {
   water_streak:{ label:'Voda a séria', icon:'💧', removable:true },
 };
 let PROFILE = { ...DEFAULT_PROFILE, ...(DB.get('profile')||{}) };
-function saveProfile(patch){ PROFILE = { ...PROFILE, ...patch }; DB.set('profile', PROFILE); }
+function saveProfile(patch){ PROFILE = { ...PROFILE, ...patch }; DB.set('profile', PROFILE); scheduleCloudPush(); }
 // Zaisti, že homeLayout je vždy platné pole (ochrana pred starými profilmi z localStorage)
 if (!Array.isArray(PROFILE.homeLayout)) PROFILE.homeLayout = [...DEFAULT_PROFILE.homeLayout];
 
 let SESSION = DB.get('session') || {};      // aktívny rozpísaný tréning, klúč = day.id
-function saveSession(){ DB.set('session', SESSION); }
+function saveSession(){ DB.set('session', SESSION); scheduleCloudPush(); }
 let HISTORY = DB.get('history') || [];      // dokončené tréningy
-function saveHistory(){ DB.set('history', HISTORY); }
+function saveHistory(){ DB.set('history', HISTORY); scheduleCloudPush(); }
 let CUSTOM_SPLITS = DB.get('splits') || []; // [{id, name, days:[{id,label,title,subtitle,exercises:[{id,name,sets,reps,note,muscle}]}]}]
-function saveSplits(){ DB.set('splits', CUSTOM_SPLITS); }
+function saveSplits(){ DB.set('splits', CUSTOM_SPLITS); scheduleCloudPush(); }
 let ACTIVE_SPLIT_ID = DB.get('activeSplitId') || null; // null = preset PPL, inak ID z CUSTOM_SPLITS
-function saveActiveSplitId(){ DB.set('activeSplitId', ACTIVE_SPLIT_ID); }
+function saveActiveSplitId(){ DB.set('activeSplitId', ACTIVE_SPLIT_ID); scheduleCloudPush(); }
 let NUTRITION_LOG = DB.get('nutrition') || {}; // { 'YYYY-MM-DD': [{...}] }
-function saveNutrition(){ DB.set('nutrition', NUTRITION_LOG); }
+function saveNutrition(){ DB.set('nutrition', NUTRITION_LOG); scheduleCloudPush(); }
 let WATER_LOG = DB.get('water') || {}; // { 'YYYY-MM-DD': ml }
-function saveWater(){ DB.set('water', WATER_LOG); }
+function saveWater(){ DB.set('water', WATER_LOG); scheduleCloudPush(); }
 let CUSTOM_FOODS = DB.get('customFoods') || []; // vlastné potraviny užívateľa
-function saveCustomFoods(){ DB.set('customFoods', CUSTOM_FOODS); }
+function saveCustomFoods(){ DB.set('customFoods', CUSTOM_FOODS); scheduleCloudPush(); }
 let RECENT_FOODS = DB.get('recentFoods') || []; // nedávno použité (názvy)
-function saveRecentFoods(){ DB.set('recentFoods', RECENT_FOODS); }
+function saveRecentFoods(){ DB.set('recentFoods', RECENT_FOODS); scheduleCloudPush(); }
 // Záznamy telesných mier v čase: [{date, weightKg, bodyFatPct, waistCm, chestCm, bicepCm, thighCm, hipCm}]
 let BODY_LOG = DB.get('bodyLog') || [];
-function saveBodyLog(){ DB.set('bodyLog', BODY_LOG); }
+function saveBodyLog(){ DB.set('bodyLog', BODY_LOG); scheduleCloudPush(); }
+
+// ───────────────────────── CLOUD SYNC (Supabase) ────────────────────────
+const SUPABASE_URL = 'https://bbfbvljfmztemoexkkqc.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJiZmJ2bGpmbXp0ZW1vZXhra3FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4NTc1MzQsImV4cCI6MjA5NzQzMzUzNH0.B4cDRlm_DUdCCJSgtMN1m6AF94Zg5N-8Zq3oE2jdJHg';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let CLOUD_USER = null; // prihlásený Supabase užívateľ, alebo null ak nie je prihlásený
+let cloudSyncTimer = null;
+
+function getLocalStateSnapshot() {
+  return {
+    profile: PROFILE, session: SESSION, history: HISTORY, splits: CUSTOM_SPLITS,
+    activeSplitId: ACTIVE_SPLIT_ID, nutrition: NUTRITION_LOG, water: WATER_LOG,
+    customFoods: CUSTOM_FOODS, recentFoods: RECENT_FOODS, bodyLog: BODY_LOG,
+  };
+}
+
+function applyCloudState(data) {
+  if (!data) return;
+  if (data.profile) { PROFILE = { ...DEFAULT_PROFILE, ...data.profile }; DB.set('profile', PROFILE); }
+  if (data.session) { SESSION = data.session; DB.set('session', SESSION); }
+  if (data.history) { HISTORY = data.history; DB.set('history', HISTORY); }
+  if (data.splits) { CUSTOM_SPLITS = data.splits; DB.set('splits', CUSTOM_SPLITS); }
+  if ('activeSplitId' in data) { ACTIVE_SPLIT_ID = data.activeSplitId; DB.set('activeSplitId', ACTIVE_SPLIT_ID); }
+  if (data.nutrition) { NUTRITION_LOG = data.nutrition; DB.set('nutrition', NUTRITION_LOG); }
+  if (data.water) { WATER_LOG = data.water; DB.set('water', WATER_LOG); }
+  if (data.customFoods) { CUSTOM_FOODS = data.customFoods; DB.set('customFoods', CUSTOM_FOODS); }
+  if (data.recentFoods) { RECENT_FOODS = data.recentFoods; DB.set('recentFoods', RECENT_FOODS); }
+  if (data.bodyLog) { BODY_LOG = data.bodyLog; DB.set('bodyLog', BODY_LOG); }
+}
+
+// Posiela lokálny stav do cloudu s krátkym debounce, aby sa pri rýchlych zmenách neposielalo zakaždým
+function scheduleCloudPush() {
+  if (!CLOUD_USER) return;
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(pushStateToCloud, 1500);
+}
+
+async function pushStateToCloud() {
+  if (!CLOUD_USER) return;
+  await supabaseClient.from('user_state').upsert({
+    user_id: CLOUD_USER.id,
+    data: getLocalStateSnapshot(),
+    updated_at: new Date().toISOString(),
+  });
+}
+
+async function pullStateFromCloud() {
+  if (!CLOUD_USER) return;
+  const { data, error } = await supabaseClient.from('user_state').select('data').eq('user_id', CLOUD_USER.id).maybeSingle();
+  if (!error && data && data.data) {
+    applyCloudState(data.data);
+  } else {
+    // Žiadny cloud záznam ešte neexistuje pre tohto užívateľa – ulož aktuálny lokálny stav ako prvotný
+    await pushStateToCloud();
+  }
+}
+
+async function signUpEmail(email, password) {
+  return supabaseClient.auth.signUp({ email, password });
+}
+async function signInEmail(email, password) {
+  return supabaseClient.auth.signInWithPassword({ email, password });
+}
+async function signOutCloud() {
+  await supabaseClient.auth.signOut();
+  CLOUD_USER = null;
+  currentRoute = 'auth';
+  render();
+}
 
 function todayKey(){ return new Date().toISOString().split('T')[0]; }
 
@@ -714,7 +783,7 @@ function el(html) {
 }
 
 // ═══════════════════════════ ROUTER ═══════════════════════════════════
-let currentRoute = PROFILE.onboardingComplete ? 'home' : 'welcome';
+let currentRoute = 'auth'; // prepísané po overení Supabase session v initApp()
 let activeTab = 'home';
 let activeDayId = DAYS[0].id;
 let expandedEx = {};
@@ -739,11 +808,14 @@ function render() {
   root.innerHTML = '';
   applyTheme(PROFILE.theme || 'auto');
 
-  if (!PROFILE.onboardingComplete && currentRoute !== 'welcome' && !currentRoute.startsWith('ob_')) {
+  if (!CLOUD_USER) {
+    currentRoute = 'auth';
+  } else if (!PROFILE.onboardingComplete && currentRoute !== 'welcome' && !currentRoute.startsWith('ob_')) {
     currentRoute = 'welcome';
   }
 
   const routes = {
+    auth: renderAuthScreen,
     welcome: renderWelcome,
     ob_gender: renderObGender,
     ob_basics: renderObBasics,
@@ -777,6 +849,81 @@ function render() {
 }
 
 
+// ═══════════════════════════ AUTH SCREEN ═══════════════════════════════
+let authMode = 'login'; // 'login' | 'signup'
+let authEmail = '';
+let authPassword = '';
+let authError = '';
+let authLoading = false;
+let authInfo = '';
+
+function renderAuthScreen() {
+  const screen = h('div', {class:'screen'});
+  const safe = h('div', {class:'scroll safe-top safe-bot'});
+
+  const center = h('div', {style:'display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:24px'});
+  center.appendChild(h('div', {style:'width:72px;height:72px;border-radius:20px;background:linear-gradient(135deg,var(--pri),var(--acc));display:flex;align-items:center;justify-content:center;margin-bottom:16px'},
+    h('span', {style:'font-size:36px;font-weight:900;color:#fff'}, 'X')));
+  center.appendChild(h('h1', {}, 'ForgeX'));
+  center.appendChild(h('p', {class:'subtitle'}, authMode==='login' ? 'Prihlás sa do svojho účtu' : 'Vytvor si nový účet'));
+  safe.appendChild(center);
+
+  const emailWrap = h('div', {style:'margin-bottom:14px'});
+  emailWrap.appendChild(h('label', {class:'input-label'}, 'Email'));
+  const emailRow = h('div', {class:'input-wrap'});
+  emailRow.appendChild(h('input', {type:'email', inputmode:'email', placeholder:'tvoj@email.sk', value:authEmail, autocomplete:'email',
+    onInput:(e)=>{ authEmail = e.target.value; }}));
+  emailWrap.appendChild(emailRow);
+  safe.appendChild(emailWrap);
+
+  const passWrap = h('div', {style:'margin-bottom:8px'});
+  passWrap.appendChild(h('label', {class:'input-label'}, 'Heslo'));
+  const passRow = h('div', {class:'input-wrap'});
+  passRow.appendChild(h('input', {type:'password', placeholder:'••••••••', value:authPassword, autocomplete: authMode==='login'?'current-password':'new-password',
+    onInput:(e)=>{ authPassword = e.target.value; }}));
+  passWrap.appendChild(passRow);
+  safe.appendChild(passWrap);
+
+  if (authError) safe.appendChild(h('p', {style:'color:var(--red);font-size:13px;margin-bottom:10px'}, authError));
+  if (authInfo) safe.appendChild(h('p', {style:'color:var(--pri);font-size:13px;margin-bottom:10px'}, authInfo));
+
+  const submit = async () => {
+    authError = ''; authInfo = '';
+    const email = authEmail.trim();
+    if (!email || !authPassword) { authError = 'Vyplň email aj heslo.'; render(); return; }
+    if (authPassword.length < 6) { authError = 'Heslo musí mať aspoň 6 znakov.'; render(); return; }
+    authLoading = true; render();
+    try {
+      if (authMode === 'signup') {
+        const { data, error } = await signUpEmail(email, authPassword);
+        if (error) { authError = error.message; }
+        else if (!data.session) { authInfo = 'Registrácia prebehla. Skontroluj email a potvrď účet, potom sa prihlás.'; authMode = 'login'; }
+        else { CLOUD_USER = data.user; await pullStateFromCloud(); currentRoute = PROFILE.onboardingComplete ? 'home' : 'welcome'; }
+      } else {
+        const { data, error } = await signInEmail(email, authPassword);
+        if (error) { authError = error.message; }
+        else { CLOUD_USER = data.user; await pullStateFromCloud(); currentRoute = PROFILE.onboardingComplete ? 'home' : 'welcome'; }
+      }
+    } catch(e) {
+      authError = 'Nepodarilo sa pripojiť. Skontroluj internetové pripojenie.';
+    }
+    authLoading = false;
+    render();
+  };
+
+  safe.appendChild(h('button', {class:'btn btn-primary', style:'margin-top:8px', onClick:submit},
+    authLoading ? 'Načítavam…' : (authMode==='login' ? 'Prihlásiť sa' : 'Registrovať sa')));
+
+  safe.appendChild(h('button', {class:'btn btn-ghost', style:'margin-top:10px', onClick:()=>{
+    authMode = authMode==='login' ? 'signup' : 'login';
+    authError = ''; authInfo = '';
+    render();
+  }}, authMode==='login' ? 'Nemáš účet? Registruj sa' : 'Už máš účet? Prihlás sa'));
+
+  screen.appendChild(safe);
+  return screen;
+}
+
 // ═══════════════════════════ ONBOARDING SCREENS ════════════════════════
 
 function progressDots(total, current) {
@@ -797,7 +944,7 @@ function renderWelcome() {
 
   const bottom = h('div', {style:'padding-bottom:10px'});
   bottom.appendChild(h('button', {class:'btn btn-primary', onClick:()=>navigate('ob_gender')}, 'Začať'));
-  bottom.appendChild(h('p', {style:'text-align:center;color:var(--txtFaint);font-size:12px;margin-top:14px'}, 'Tvoje dáta zostávajú v tvojom telefóne'));
+  bottom.appendChild(h('p', {style:'text-align:center;color:var(--txtFaint);font-size:12px;margin-top:14px'}, 'Tvoje dáta sú bezpečne zálohované v cloude'));
 
   safe.appendChild(center);
   safe.appendChild(bottom);
@@ -2904,6 +3051,7 @@ function renderTabProfile() {
     ['🎁','Promo kód', PROFILE.promoCode||null, ()=>openPromoModal()],
     ['🌍','Jazyk','Slovenčina', ()=>alert('Viacjazyčnosť (SK/CZ/EN) pripravujeme v ďalšej aktualizácii.')],
     ['⭐','Predplatné','Free', ()=>alert('ForgeX je momentálne zadarmo. Premium plán pripravujeme.')],
+    ['🚪','Odhlásiť sa', CLOUD_USER?.email||null, ()=>{ if(confirm('Naozaj sa chceš odhlásiť?')) signOutCloud(); }],
   ];
   settings.forEach(([icon,label,val,onClick],i)=>{
     const row = h('div',{class:'setting-row', style: i<settings.length-1 ? 'border-bottom:1px solid var(--border)' : '', onClick});
@@ -4076,7 +4224,7 @@ function spawnSparks() {
   }
 }
 
-function initApp() {
+async function initApp() {
   seedVTaperSplit();   // ← NOVÉ, musí byť pred render()
   // Appka sa vykresľuje "pod" splash screenom, takže keď splash zmizne, je hneď pripravená
   render();
@@ -4089,6 +4237,19 @@ function initApp() {
     splash.classList.add('fade-out');
     setTimeout(()=> splash.remove(), 380);
   }, SPLASH_DURATION);
+
+  // Over existujúcu Supabase session (napr. po reštarte appky) a stiahni cloud dáta
+  try {
+    const { data } = await supabaseClient.auth.getSession();
+    if (data?.session?.user) {
+      CLOUD_USER = data.session.user;
+      await pullStateFromCloud();
+      currentRoute = PROFILE.onboardingComplete ? 'home' : 'welcome';
+    }
+  } catch(e) {
+    console.error('Cloud session check failed', e);
+  }
+  render();
 }
 
 document.addEventListener('DOMContentLoaded', initApp);
