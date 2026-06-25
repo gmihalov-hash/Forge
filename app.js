@@ -4319,7 +4319,23 @@ function manualStartRest() {
 
 // ═══════════════════════════ INIT ═══════════════════════════════════════
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+  window.addEventListener('load', ()=> {
+    navigator.serviceWorker.register('./sw.js').then(reg=>{
+      reg.addEventListener('updatefound', ()=>{
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', ()=>{
+          if (newWorker.state==='activated') location.reload();
+        });
+      });
+    }).catch(()=>{});
+  });
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if (reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
 }
 
 // Generuje malé iskry vyletujúce z loga počas splash animácie
