@@ -234,6 +234,7 @@ const DEFAULT_PROFILE = {
   notifRest:true,            // notifikácia po prestávke
   notifDaily:false,          // denná pripomienka tréningu
   promoCode:null,            // zadaný promo kód
+  premium:false,             // true = bez reklám (odomknuté promo kódom)
   // ── Časovač (Dávka 1) ──
   restSeconds:90,            // default dĺžka prestávky medzi sériami
   restAutoStart:true,        // auto spustenie po odkliknutí série
@@ -774,6 +775,11 @@ function h(tag, attrs={}, children=[]) {
   });
   return el;
 }
+
+// Promo kódy – mapujú kód na zmeny profilu, ktoré sa po uplatnení uložia
+const PROMO_CODES = {
+  'FORGEX-NOADS': { premium: true },
+};
 
 // Manuálny AdSense banner – vkladá <ins class="adsbygoogle"> a hneď nechá Google naplniť reklamu
 function adBanner() {
@@ -1343,7 +1349,7 @@ function renderTabHome() {
   // Tlačidlo na úpravu rozloženia – decentné, na konci
   wrap.appendChild(h('button',{class:'btn btn-ghost',style:'margin-top:4px;font-size:12px', onClick:()=>navigate('home_customize')},'⚙ Upraviť domovskú obrazovku'));
 
-  wrap.appendChild(adBanner());
+  if (!PROFILE.premium) wrap.appendChild(adBanner());
 
   return wrap;
 }
@@ -2322,7 +2328,7 @@ function renderTabNutrition() {
   const addBtn = h('button',{class:'btn btn-primary',style:'margin-top:16px', onClick:()=>openAddFoodModal()},'+ Pridať jedlo');
   wrap.appendChild(addBtn);
 
-  wrap.appendChild(adBanner());
+  if (!PROFILE.premium) wrap.appendChild(adBanner());
 
   return wrap;
 }
@@ -2719,7 +2725,7 @@ function renderTabStats() {
   else if (statsSubView==='body') renderStatsBody(wrap);
   else if (statsSubView==='week') renderStatsWeek(wrap);
 
-  wrap.appendChild(adBanner());
+  if (!PROFILE.premium) wrap.appendChild(adBanner());
 
   return wrap;
 }
@@ -3071,7 +3077,7 @@ function renderTabProfile() {
     ['🔔','Notifikácie', PROFILE.notifRest?'Zapnuté':'Vypnuté', ()=>openNotifModal()],
     ['🎁','Promo kód', PROFILE.promoCode||null, ()=>openPromoModal()],
     ['🌍','Jazyk','Slovenčina', ()=>alert('Viacjazyčnosť (SK/CZ/EN) pripravujeme v ďalšej aktualizácii.')],
-    ['⭐','Predplatné','Free', ()=>alert('ForgeX je momentálne zadarmo. Premium plán pripravujeme.')],
+    ['⭐','Predplatné', PROFILE.premium?'Premium (bez reklám)':'Free', ()=>alert(PROFILE.premium ? 'Máš odomknutú verziu bez reklám.' : 'ForgeX je momentálne zadarmo. Premium plán pripravujeme.')],
     ['🚪','Odhlásiť sa', CLOUD_USER?.email||null, ()=>{ if(confirm('Naozaj sa chceš odhlásiť?')) signOutCloud(); }],
   ];
   settings.forEach(([icon,label,val,onClick],i)=>{
@@ -3407,22 +3413,27 @@ function openPromoModal() {
       sheet.appendChild(h('div',{class:'card card-accent',style:'margin-bottom:14px'},[
         h('div',{style:'color:var(--txtDim);font-size:12px'},'Aktívny kód'),
         h('div',{style:'color:var(--pri);font-size:18px;font-weight:800;margin-top:2px'},PROFILE.promoCode),
+        PROFILE.premium ? h('div',{style:'color:var(--green);font-size:12px;margin-top:6px'},'✓ Reklamy vypnuté') : null,
       ]));
-      sheet.appendChild(h('button',{class:'btn btn-ghost',style:'color:var(--red)', onClick:()=>{ saveProfile({promoCode:null}); closeModal(); openPromoModal(); }},'Odstrániť kód'));
+      sheet.appendChild(h('button',{class:'btn btn-ghost',style:'color:var(--red)', onClick:()=>{ saveProfile({promoCode:null, premium:false}); closeModal(); openPromoModal(); }},'Odstrániť kód'));
       return;
     }
     sheet.appendChild(h('p',{style:'color:var(--txtDim);font-size:13px;margin-bottom:14px'},'Zadaj promo kód ak ho máš.'));
+    const errEl = h('p',{style:'color:var(--red);font-size:13px;margin-bottom:10px;display:none'});
+    sheet.appendChild(errEl);
     const wrap = h('div',{class:'input-wrap'});
-    const inp = h('input',{type:'text',placeholder:'napr. FORGEX2026', id:'promo-input', style:'text-transform:uppercase'});
+    const inp = h('input',{type:'text',placeholder:'napr. FORGEX-NOADS',id:'promo-input', style:'text-transform:uppercase'});
     wrap.appendChild(inp);
     sheet.appendChild(wrap);
     sheet.appendChild(h('button',{class:'btn btn-primary', onClick:()=>{
       const val = (document.getElementById('promo-input')?.value||'').trim().toUpperCase();
       if (!val) return;
-      // Demo validácia – reálne kódy budú overené cez backend
-      saveProfile({promoCode:val});
-      alert('Kód uložený. Bude overený pri pripojení k účtu (pripravujeme).');
-      closeModal(); render();
+      const promo = PROMO_CODES[val];
+      if (!promo) { errEl.textContent='Neplatný kód.'; errEl.style.display='block'; return; }
+      saveProfile({promoCode:val, ...promo});
+      closeModal();
+      showToast(promo.premium ? '✓ Reklamy vypnuté' : '✓ Kód uplatnený');
+      render();
     }},'Uplatniť kód'));
   });
 }
