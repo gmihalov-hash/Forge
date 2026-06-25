@@ -1853,6 +1853,8 @@ function adjustSetField(dayId, exId, setIdx, field, delta) {
   // Ulož do session (váhu konvertuj späť na kg)
   if (field==='weight') {
     setSetVal(dayId, exId, setIdx, 'weight', inputToKg(next));
+    // Váha 1. série ovplyvňuje výpočet rozcvičky – tú treba prekresliť
+    if (setIdx===0) render();
   } else {
     setSetVal(dayId, exId, setIdx, 'reps', String(next));
   }
