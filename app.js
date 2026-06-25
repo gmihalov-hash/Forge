@@ -1019,7 +1019,7 @@ function renderObResults() {
   const macroGrid = h('div',{class:'macro-grid'});
   [['Bielkoviny',macros?.proteinG,'var(--pri)'],['Sacharidy',macros?.carbsG,'var(--acc)'],['Tuky',macros?.fatG,'var(--txtDim)']].forEach(([label,val,color])=>{
     const card = h('div',{class:'macro-card'});
-    card.appendChild(h('div',{class:'macro-dot',style:'background:'+color}));
+    card.appendChild(h('div',{class:'macro-card-dot',style:'background:'+color}));
     card.appendChild(h('p',{style:'color:var(--txt);font-size:18px;font-weight:800;margin-top:6px'}, (val??'–')+' '+'g'));
     card.appendChild(h('p',{style:'color:var(--txtDim);font-size:11px;margin-top:2px'}, label));
     macroGrid.appendChild(card);
@@ -1202,7 +1202,8 @@ function renderHomeSectionHero() {
     heroCard.addEventListener('click',()=>{
       activeDayId = activeSplitDay.id;
       workoutModeDayId = activeSplitDay.id;
-      workoutModeExIdx = activeSplitDay.exercises?.findIndex(ex=>!isExDone(activeSplitDay.id,ex))||0;
+      const nextIdx = activeSplitDay.exercises?.findIndex(ex=>!isExDone(activeSplitDay.id,ex));
+      workoutModeExIdx = (nextIdx==null||nextIdx<0) ? 0 : nextIdx;
       navigate('workout_mode');
     });
   } else if (hasCustomWithWeekdays) {
@@ -3478,7 +3479,7 @@ function renderWorkoutMode() {
 
 function renderSplitManage() {
   const screen = h('div', {class:'screen'});
-  const top = h('div', {class:'safe-top', style:'padding:16px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
+  const top = h('div', {style:'padding:calc(var(--safeT) + 16px) 20px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)'});
   top.appendChild(h('button',{class:'icon-btn', onClick:backToTraining},'←'));
   top.appendChild(h('h2',{},'Moje splits'));
   screen.appendChild(top);
