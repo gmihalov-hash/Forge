@@ -414,6 +414,7 @@ const EXERCISE_LIBRARY = [
   {id:'legcurlseated',name:'Zakopávanie na stroji (sed)',muscle:'hamstrings',equipment:'machine',sets:3,reps:'12–15',note:'Plný rozsah pohybu. Kontrola v hornej kontrakcii.'},
   {id:'gooddmorning',name:'Good morning',muscle:'hamstrings',equipment:'barbell',sets:3,reps:'8–10',note:'Mierny ohyb v kolenách. Predklon z bokov, nie z drieku.'},
   {id:'stiffleg',name:'Mŕtvy ťah na strnulých nohách',muscle:'hamstrings',equipment:'barbell',sets:3,reps:'8–10',note:'Minimálny ohyb kolien. Maximálny stretch hamstringov.'},
+  {id:'rdldb',name:'RDL s jednoručkami / trap bar',muscle:'hamstrings',equipment:'dumbbell',sets:3,reps:'8–10',note:'Bezpečnejšia alternatíva veľkej činky pre spodný chrbát. Jednoručky pri tele, tlak panvy dozadu.'},
 
   // ── SEDACIE SVALY ──
   {id:'hipthrust',name:'Hip thrust',muscle:'glutes',equipment:'barbell',sets:3,reps:'8–12',note:'Lopatky opreté o lavičku. Plná extenzia bokov nahor.'},
@@ -434,6 +435,7 @@ const EXERCISE_LIBRARY = [
 
   // ── PREDLAKTIA ──
   {id:'wristcurl',name:'Zdvih zápästia (predlaktia)',muscle:'forearms',equipment:'barbell',sets:3,reps:'15–20',note:'Predlaktia opreté o lavičku. Pohyb len v zápästí.'},
+  {id:'reversecurl',name:'Reverse Curl (nadhmat)',muscle:'forearms',equipment:'barbell',sets:3,reps:'12–15',note:'Nadhmat (dlane dole). Cieli brachioradialis – vrchnú časť predlaktia.'},
   {id:'farmercarry',name:'Farmer’s walk',muscle:'forearms',equipment:'dumbbell',sets:3,reps:'20–30m',note:'Vzpriamený postoj, pevný úchop. Statická záťaž na predlaktia.'},
 ];
 
@@ -624,6 +626,65 @@ function getTemplate(daysPerWeek, gender){
   const g = gender || PROFILE.gender;
   const templateSet = (g==='female') ? SPLIT_TEMPLATES_FEMALE : SPLIT_TEMPLATES;
   return templateSet[daysPerWeek] || templateSet[3];
+}
+
+// ───────────────────────── SEED: V-TAPER (ADONIS) SPLIT ─────────────────
+// Jednorazové, idempotentné vloženie 5-dňového splitu zameraného na V-taper.
+// Kontrola podľa stabilného ID – pri opätovnom volaní (každý reload appky) sa nič neduplikuje.
+const VTAPER_SPLIT_ID = 'split_vtaper_adonis_v1';
+
+function seedVTaperSplit() {
+  if (CUSTOM_SPLITS.some(s=>s.id===VTAPER_SPLIT_ID)) return;
+
+  CUSTOM_SPLITS.push({
+    id: VTAPER_SPLIT_ID,
+    name: 'V-Taper (Adonis ratio)',
+    daysPerWeek: 5,
+    gender: PROFILE.gender,
+    days: [
+      { id:'vt_d1', label:'D1', title:'PUSH', subtitle:'Ramená (šírka) · Hrudník · Triceps', weekday:1, exercises:[
+        {id:'ohp', name:'Tlak nad hlavu (veľká činka)', sets:4, reps:'6–8', rest:150, muscle:'shoulders', note:'Primárny driver šírky ramien. Stoj, jadro spevnené, tlak vertikálne nad hlavu.'},
+        {id:'incpress', name:'Incline Dumbbell Press', sets:3, reps:'8–10', rest:90, muscle:'chest', note:'Lavička 30°. Sekundárny cvik – priorita týždňa sú delty, nie hrudník.'},
+        {id:'lateral', name:'Upažovanie v stoji (jednoručky)', sets:4, reps:'12–15', rest:60, muscle:'shoulders', note:'Skapulárna rovina (30° pred telom). Kľúčový cvik pre šírku – necítiť v trapézoch.'},
+        {id:'cablelateral', name:'Upažovanie na kladke', sets:3, reps:'15–20', rest:45, muscle:'shoulders', note:'Konštantné napätie počas celého pohybu. Finisher na stredný deltoid.'},
+        {id:'french', name:'Francúzsky tlak (EZ činka)', sets:3, reps:'10–12', rest:75, muscle:'triceps', note:'Ruky mierne za hlavou. Konštantné napätie dlhej hlavy.'},
+        {id:'tricpull', name:'Triceps kladka (lano)', sets:3, reps:'12–15', rest:60, muscle:'triceps', note:'Lakte pri tele. Roztiahnutie lana v spodnej pozícii.'},
+      ]},
+      { id:'vt_d2', label:'D2', title:'PULL', subtitle:'Chrbát (šírka) · Zadné delty · Biceps', weekday:2, exercises:[
+        {id:'latpull', name:'Sťahovanie kladky na široko', sets:4, reps:'8–10', rest:90, muscle:'back', note:'Vertikálny ťah na hrudník. Hlavný driver šírky chrbáta (laty).'},
+        {id:'barbellrow', name:'Zohnutý záves s veľkou činkou', sets:3, reps:'6–10', rest:120, muscle:'back', note:'Trup 45°. Ťah k spodnému brušku. Neguliť spodný chrbát.'},
+        {id:'streach', name:'Sťahovanie kladky s vystretými rukami', sets:3, reps:'12–15', rest:60, muscle:'back', note:'Pohyb len z ramenného kĺbu. Konštantné napätie v latissimoch – ďalší driver šírky.'},
+        {id:'facepull', name:'Face pull', sets:3, reps:'15–20', rest:45, muscle:'back', note:'Ťah k tvári, lakte vysoko. Zadná delta + vonkajšia rotácia – 3D tvar ramena.'},
+        {id:'hammer', name:'Kladivové zdvihy', sets:3, reps:'10–12', rest:60, muscle:'biceps', note:'Neutrálny úchop. Brachialis – vytláča biceps nahor.'},
+        {id:'ezcurl', name:'Bicepsový zdvih (EZ činka)', sets:3, reps:'8–10', rest:75, muscle:'biceps', note:'Podhmat. Lakte zafixované mierne pred telom.'},
+      ]},
+      { id:'vt_d3', label:'D3', title:'LEGS', subtitle:'Kvadricepsy · Hamstringy · Lýtka', weekday:3, exercises:[
+        {id:'hacken', name:'Hacken drep', sets:3, reps:'8–10', rest:120, muscle:'quads', note:'Zostup pod paralelu. Panva opretá o podložku celý čas.'},
+        {id:'rdldb', name:'RDL s jednoručkami / trap bar', sets:3, reps:'8–10', rest:120, muscle:'hamstrings', note:'Bezpečná alternatíva veľkej činky pre spodný chrbát. Tlak panvy dozadu.'},
+        {id:'legpress', name:'Legpress', sets:3, reps:'10–12', rest:90, muscle:'quads', note:'Strážiť spodný chrbát. Neprepínať kolená do zámku.'},
+        {id:'legext', name:'Predkopávanie na stroji', sets:3, reps:'12–15', rest:60, muscle:'quads', note:'1s stopka v maximálnej kontrakcii nahor.'},
+        {id:'legcurl', name:'Zakopávanie na stroji (ľah)', sets:3, reps:'12–15', rest:60, muscle:'hamstrings', note:'Aktivácia hamstringov. Pomalá excentrická fáza, žiadne hádzanie váhou.'},
+        {id:'calf', name:'Výpony na lýtka v stoji', sets:4, reps:'15', rest:45, muscle:'calves', note:'Plný stretch dole – 1s pauza – výbušne na špičky.'},
+      ]},
+      { id:'vt_d4', label:'D4', title:'UPPER', subtitle:'2. stimul – Ramená · Chrbát · Hrudník + Core', weekday:4, exercises:[
+        {id:'incpress', name:'Incline Dumbbell Press', sets:3, reps:'8–10', rest:90, muscle:'chest', note:'2. týždenný stimul pre horný hrudník.'},
+        {id:'latpull2', name:'Sťahovanie kladky na úzko', sets:3, reps:'8–10', rest:90, muscle:'back', note:'Podhmat / V-adaptér. Spodné vlákna latissimov.'},
+        {id:'rowover', name:'Príťahy s oporou (nadhmat)', sets:3, reps:'8–10', rest:90, muscle:'back', note:'Dlane dole. Vedome bez dôrazu na trapézy – žiadne ťažké shrugovanie v pláne.'},
+        {id:'lateral', name:'Upažovanie v stoji (jednoručky)', sets:3, reps:'12–15', rest:60, muscle:'shoulders', note:'2. týždenný stimul pre stredný deltoid – kritické pre šírku ramien.'},
+        {id:'cabcross', name:'Protismerné kladky zo spodu', sets:3, reps:'12–15', rest:60, muscle:'chest', note:'Ťah nahor k očiam. Izolácia hrudníka.'},
+        {id:'cablecrunch', name:'Brušné zhyby na kladke', sets:3, reps:'15–20', rest:45, muscle:'core', note:'Core 1/2 – výlučne rectus abdominis. Kľak pred kladkou, flexia drieku.'},
+      ]},
+      { id:'vt_d5', label:'D5', title:'ARMS', subtitle:'Triceps · Biceps · Predlaktia + Core', weekday:5, exercises:[
+        {id:'triext', name:'Tricepsové extenzie nad hlavou', sets:3, reps:'10–12', rest:75, muscle:'triceps', note:'Lano spoza hlavy. Stretch dlhej hlavy tricepsu – iný uhol než Deň 1.'},
+        {id:'tripush', name:'Tricepsové stláčanie (V-adaptér)', sets:3, reps:'12–15', rest:60, muscle:'triceps', note:'Tlak kolmo nadol. Lakte pevne pri tele.'},
+        {id:'inccurl', name:'Incline Dumbbell Curls', sets:3, reps:'10–12', rest:0, muscle:'biceps', note:'SUPERSET A1 – bez pauzy, hneď pokračuj Reverse Curl. Šikmá lavička 45°, extrémny stretch dlhej hlavy = peak bicepsu.'},
+        {id:'reversecurl', name:'Reverse Curl (nadhmat)', sets:3, reps:'12–15', rest:60, muscle:'forearms', note:'SUPERSET A2 – nadhmat, cieli brachioradialis. Pauza až po dokončení oboch cvikov páru.'},
+        {id:'concentrationcurl', name:'Koncentrovaný zdvih', sets:3, reps:'12–15', rest:60, muscle:'biceps', note:'Lakte opretý o stehno. Druhý driver peaku bicepsu.'},
+        {id:'hangingleg', name:'Zdvih nôh vo zhybe', sets:3, reps:'12–15', rest:45, muscle:'core', note:'Core 2/2 – výlučne rectus abdominis, žiadne rotácie/bočné ohyby.'},
+      ]},
+    ],
+  });
+  saveSplits();
 }
 
 
@@ -1441,7 +1502,7 @@ function renderExerciseCard(day, ex, idx) {
   const header = h('div',{class:'ex-header',onClick:()=>{expandedEx[ex.id]=!expandedEx[ex.id]; render();}});
   header.appendChild(h('div',{class:'ex-num'}, done?'✓':String(idx+1)));
   header.appendChild(h('div',{class:'ex-name'},ex.name));
-  header.appendChild(h('div',{class:'ex-badge'},`${ex.sets}× ${ex.reps}`));
+  header.appendChild(h('div',{class:'ex-badge'},`${ex.sets}× ${ex.reps}`+(exRestLabel(ex)?` · ⏱${exRestLabel(ex)}`:'')));
   header.appendChild(h('div',{style:'color:var(--txtFaint);font-size:12px;margin-left:4px'}, isExpanded?'▲':'▼'));
   card.appendChild(header);
   card.appendChild(h('div',{class:'ex-note'},ex.note));
@@ -1556,7 +1617,7 @@ function renderExerciseCard(day, ex, idx) {
         // Načítaj aktuálne hodnoty z inputov (môžu byť upravené stepperom bez re-renderu)
         const curW = document.getElementById(`w-${ex.id}-${si}`)?.value || wVal;
         const curR = document.getElementById(`r-${ex.id}-${si}`)?.value || rVal;
-        completeSet(day.id, ex.id, si, curW, curR);
+        completeSet(day.id, ex.id, si, curW, curR, ex.rest);
       }},'✓');
       fields.appendChild(checkBtn);
 
@@ -1610,7 +1671,7 @@ function adjustSetField(dayId, exId, setIdx, field, delta) {
 }
 
 // Dokončenie série – uloží hodnoty (ak nie sú), zazelení, spustí timer, auto-skok
-function completeSet(dayId, exId, setIdx, displayedW, displayedR) {
+function completeSet(dayId, exId, setIdx, displayedW, displayedR, restSeconds) {
   if (!SESSION[dayId]) SESSION[dayId]={};
   if (!SESSION[dayId][exId]) SESSION[dayId][exId]={};
   if (!SESSION[dayId][exId].sets) SESSION[dayId][exId].sets=[];
@@ -1627,8 +1688,9 @@ function completeSet(dayId, exId, setIdx, displayedW, displayedR) {
     vibrate(15);
     saveSession();
     // Spusti časovač prestávky (ak je zapnutý auto-start)
-    if (PROFILE.restAutoStart && PROFILE.restSeconds>0) {
-      startRestTimer(PROFILE.restSeconds);
+    if (PROFILE.restAutoStart) {
+      const seconds = (restSeconds!=null) ? restSeconds : (PROFILE.restSeconds||90);
+      if (seconds>0) startRestTimer(seconds);
     }
     render();
   } else {
@@ -3301,7 +3363,7 @@ function renderWorkoutMode() {
 
   scroll.appendChild(h('div',{style:'color:var(--txtDim);font-size:12px;font-weight:600;margin-bottom:4px'}, `Cvik ${workoutModeExIdx+1} z ${day.exercises.length}`));
   scroll.appendChild(h('div',{style:'color:var(--pri);font-size:24px;font-weight:800;line-height:1.1;margin-bottom:6px'}, ex.name));
-  scroll.appendChild(h('div',{style:'color:var(--txtDim);font-size:13px;margin-bottom:2px'}, `Cieľ: ${ex.sets} série × ${ex.reps} opakovaní · ${MUSCLE_LABELS[ex.muscle]||''}`));
+  scroll.appendChild(h('div',{style:'color:var(--txtDim);font-size:13px;margin-bottom:2px'}, `Cieľ: ${ex.sets} série × ${ex.reps} opakovaní · ${MUSCLE_LABELS[ex.muscle]||''}`+(exRestLabel(ex)?` · pauza ${exRestLabel(ex)}`:'')));
   scroll.appendChild(h('div',{class:'ex-note',style:'padding:10px 0 16px 0'}, ex.note));
 
   const suggestion = suggestProgression(ex);
@@ -3383,7 +3445,7 @@ function renderWorkoutMode() {
     const checkBtn = h('button',{class:'set-check-lg'+(isDone?' done':''), onClick:()=>{
       const curW = document.getElementById(`w-${ex.id}-${si}`)?.value || wVal;
       const curR = document.getElementById(`r-${ex.id}-${si}`)?.value || rVal;
-      completeSet(day.id, ex.id, si, curW, curR);
+      completeSet(day.id, ex.id, si, curW, curR, ex.rest);
     }},'✓');
     fields.appendChild(checkBtn);
     block.appendChild(fields);
@@ -3769,7 +3831,7 @@ function renderSplitEditDay() {
     rowInner.appendChild(h('div',{class:'ex-num'},String(idx+1)));
     const info = h('div',{style:'flex:1;min-width:0'});
     info.appendChild(h('div',{style:'color:var(--txt);font-weight:600;font-size:14px'},ex.name));
-    info.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:2px'},`${ex.sets}× ${ex.reps} · ${MUSCLE_LABELS[ex.muscle]||''}`));
+    info.appendChild(h('div',{style:'color:var(--txtDim);font-size:11px;margin-top:2px'},`${ex.sets}× ${ex.reps} · ${MUSCLE_LABELS[ex.muscle]||''}`+(exRestLabel(ex)?` · ⏱${exRestLabel(ex)}`:'')));
     rowInner.appendChild(info);
 
     // Tlačidlo VÝMENY cviku za alternatívu z rovnakej partie
@@ -3930,6 +3992,12 @@ function fmtTime(s) {
   return m>0 ? `${m}:${String(sec).padStart(2,'0')}` : `${sec}s`;
 }
 
+function exRestLabel(ex) {
+  if (ex.rest===0) return 'superset';
+  if (ex.rest!=null) return fmtTime(ex.rest);
+  return null;
+}
+
 function renderRestTimer() {
   let el = document.getElementById('rest-timer');
   if (el) el.remove();
@@ -4008,6 +4076,7 @@ function spawnSparks() {
 }
 
 function initApp() {
+  seedVTaperSplit();   // ← NOVÉ, musí byť pred render()
   // Appka sa vykresľuje "pod" splash screenom, takže keď splash zmizne, je hneď pripravená
   render();
   spawnSparks();
