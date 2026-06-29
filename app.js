@@ -4227,35 +4227,94 @@ function openExercisePickerModal(day) {
 
 // ═══════════════════════════ REST TIMER ════════════════════════════════
 let restTimerInterval = null;
-let restTimerRemaining = 0;
+let restTimerEndAt = 0;       // absolútny Unix timestamp (ms) konca prestávky — JEDINÝ zdroj pravdy
+let restTimerRemaining = 0;   // odvodená hodnota pre render; nikdy sa z nej nepočíta, len sa do nej zapisuje
+let wakeLockSentinel = null;
 
+// Dôvod refaktoru: countdown dekrementáciou (restTimerRemaining--) v setInterval zlyhá, keď
+// platforma (najmä iOS Safari/PWA) suspendne JS na pozadí — tiky sa nezrýchlia, len sa stratia,
+// takže timer po návrate ukazuje nesprávny (vyšší) zostávajúci čas. Timestamp model je voči
+// tomu imúnny, pretože vždy prepočíta z Date.now(), nezávisle od počtu zmeškaných tikov.
 function startRestTimer(seconds) {
   stopRestTimer();
-  restTimerRemaining = seconds;
+  restTimerEndAt = Date.now() + seconds*1000;
+  persistRestTimer();
+  requestWakeLock();
   renderRestTimer();
-  restTimerInterval = setInterval(()=>{
-    restTimerRemaining--;
-    if (restTimerRemaining <= 0) {
-      stopRestTimer();
-      vibrate([200,100,200]);
-      if (PROFILE.notifRest) showRestDoneNotification();
-    } else {
-      updateRestTimerDisplay();
-    }
-  }, 1000);
+  restTimerInterval = setInterval(tickRestTimer, 1000);
+  tickRestTimer();
+}
+
+function tickRestTimer() {
+  restTimerRemaining = Math.max(0, Math.round((restTimerEndAt - Date.now())/1000));
+  if (restTimerRemaining <= 0) {
+    stopRestTimer();
+    vibrate([200,100,200]);
+    if (PROFILE.notifRest) showRestDoneNotification();
+  } else {
+    updateRestTimerDisplay();
+  }
 }
 
 function stopRestTimer() {
   if (restTimerInterval) { clearInterval(restTimerInterval); restTimerInterval=null; }
+  restTimerEndAt = 0;
+  restTimerRemaining = 0;
+  try { localStorage.removeItem('restTimerEndAt'); } catch(e){}
+  releaseWakeLock();
   const el = document.getElementById('rest-timer');
   if (el) el.remove();
 }
 
 function addRestTime(delta) {
-  restTimerRemaining = Math.max(0, restTimerRemaining + delta);
-  if (restTimerRemaining===0) { stopRestTimer(); return; }
-  updateRestTimerDisplay();
+  if (!restTimerEndAt) return;
+  restTimerEndAt = Math.max(Date.now(), restTimerEndAt + delta*1000);
+  persistRestTimer();
+  tickRestTimer();
 }
+
+function persistRestTimer() {
+  // Prežije aj prípad, keď iOS appku úplne evictne z pamäte (nielen suspendne) a pri návrate
+  // sa spustí čistý reload — restoreRestTimer() pri inite obnoví stav z timestampu.
+  try { localStorage.setItem('restTimerEndAt', String(restTimerEndAt)); } catch(e){}
+}
+
+function restoreRestTimer() {
+  let saved;
+  try { saved = localStorage.getItem('restTimerEndAt'); } catch(e){ return; }
+  if (!saved) return;
+  const endAt = parseInt(saved, 10);
+  if (!endAt || endAt <= Date.now()) {
+    try { localStorage.removeItem('restTimerEndAt'); } catch(e){}
+    return;
+  }
+  restTimerEndAt = endAt;
+  requestWakeLock();
+  renderRestTimer();
+  restTimerInterval = setInterval(tickRestTimer, 1000);
+  tickRestTimer();
+}
+
+// Wake Lock je len zmiernenie (bráni zhasnutiu displeja, nie prepnutiu appky/uzamknutiu telefónu) —
+// podľa špecifikácie sa automaticky releasne pri schovaní stránky, preto sa re-requestuje nižšie
+// vo visibilitychange listeneri.
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try { wakeLockSentinel = await navigator.wakeLock.request('screen'); }
+  catch(e) { /* napr. low power mode alebo zamietnuté – ticho ignorovať, timestamp model je fallback */ }
+}
+
+function releaseWakeLock() {
+  if (wakeLockSentinel) { wakeLockSentinel.release().catch(()=>{}); wakeLockSentinel = null; }
+}
+
+// Pri návrate appky do popredia okamžite prepočítaj zo zdroja pravdy (Date.now()) – nezávisle
+// od toho, koľko sekundových tikov platforma medzitým "zjedla" počas suspendu.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !restTimerEndAt) return;
+  tickRestTimer();
+  if (restTimerInterval) requestWakeLock();
+});
 
 function fmtTime(s) {
   const m = Math.floor(s/60);
@@ -4366,6 +4425,7 @@ async function initApp() {
   seedVTaperSplit();   // ← NOVÉ, musí byť pred render()
   // Appka sa vykresľuje "pod" splash screenom, takže keď splash zmizne, je hneď pripravená
   render();
+  restoreRestTimer();  // obnoví bežiaci rest timer po reloade/evictnutí appky z pamäte
   spawnSparks();
   setTimeout(()=>{ if (document.getElementById('splash')) spawnSparks(); }, 1400); // druhá vlna iskier
   const splash = document.getElementById('splash');
